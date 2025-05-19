@@ -14,10 +14,9 @@ class QuotationManagementWindow(tk.Toplevel):
         self.db_ops = db_ops      # db_ops インスタンスを保持
         self.selected_quotation_id = None 
         self.selected_project_id_for_new_quotation = None # この行も必要に応じて
-        # self._is_preparing_new = False # 「---」問題の unbind/bind 方式を採用した場合はこの行は不要
-
+        self._preparing_new_quotation_flag = False  # ★ 新規見積準備中フラグ (以前の修正で導入)
+        self._is_editing_header = False             # ★ ヘッダー編集中フラグ (今回の提案で導入)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
-
         self._create_widgets() # ウィジェット作成メソッドを呼び出し
         self.load_quotation_headers_to_treeview()
 
@@ -204,6 +203,55 @@ class QuotationManagementWindow(tk.Toplevel):
         # 必要に応じて他の列のweightも設定
         # TODO: 将来的には編集用にEntryウィジェットなどと切り替えられるようにする
 
+    def start_header_edit_mode(self):
+        if self.selected_quotation_id is None:
+            messagebox.showwarning("未選択", "編集する見積ヘッダーが選択されていません。", parent=self)
+            self.lift()
+            return
+
+        self._is_editing_header = True # ヘッダー編集中フラグを立てる
+
+        # フォームの入力欄を編集可能にする (読み取り専用のフィールドは除く)
+        editable_fields = [
+            "quotation_code", "quotation_date", "customer_name_at_quote", 
+            "project_name_at_quote", "site_address_at_quote", 
+            "construction_period_notes", "tax_rate", 
+            "validity_period_notes", "payment_terms_notes", 
+            "status", "remarks", "project_id", "quotation_staff_id"
+        ]
+        # 注意: project_id や quotation_staff_id は直接編集させるか、
+        #       別途選択ダイアログなどを用意するか検討が必要です。
+        #       ここでは一旦、直接編集可能としています。
+        #       total_amount_exclusive_tax, tax_amount, total_amount_inclusive_tax,
+        #       staff_name, original_project_code は readonly のままが良いでしょう。
+
+        for key, entry_widget in self.header_form_entries.items():
+            if key in editable_fields:
+                # 'status' はComboboxに変更する可能性があるため、その場合は扱いを調整
+                if key == "status" and isinstance(entry_widget, ttk.Combobox):
+                     entry_widget.config(state="readonly") # Comboboxはreadonlyで選択可能
+                else:
+                    entry_widget.config(state="normal")
+            else:
+                entry_widget.config(state="readonly") # 編集対象外はreadonlyを維持
+
+        if hasattr(self, 'save_quotation_button'):
+            self.save_quotation_button.config(state="normal")
+        if hasattr(self, 'start_edit_header_button'):
+            self.start_edit_header_button.config(state="disabled") # 編集開始ボタンは一旦無効化
+        if hasattr(self, 'new_quotation_button'):
+            self.new_quotation_button.config(state="disabled") # 新規作成ボタンも編集中は無効化 (推奨)
+        
+        # 必要であれば、編集をキャンセルするボタンを有効化する
+        # (例: self.cancel_edit_header_button.config(state="normal"))
+
+        # 編集開始時に、最初の編集可能フィールドにフォーカスを当てる (例: 見積番号)
+        if "quotation_code" in self.header_form_entries:
+            self.header_form_entries["quotation_code"].focus_set()
+        
+        print("### DEBUG: Entered header edit mode.")
+        self.lift()
+
 
     def _create_items_treeview(self, parent_frame):
         # ### 変更点: 表示カラムの変更 ###
@@ -247,28 +295,32 @@ class QuotationManagementWindow(tk.Toplevel):
         self.new_quotation_button = ttk.Button(parent_frame, text="新規見積作成", command=self.prepare_new_quotation)
         self.new_quotation_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        # 他のグローバルボタン（例：保存、印刷など）もここに追加可能
+        # 「ヘッダー編集開始」ボタンを追加
+        self.start_edit_header_button = ttk.Button(parent_frame, text="ヘッダー編集開始", command=self.start_header_edit_mode, state=tk.DISABLED)
+        self.start_edit_header_button.pack(side=tk.LEFT, padx=5, pady=5)
+
         self.save_quotation_button = ttk.Button(parent_frame, text="見積保存", command=self.save_quotation_data, state=tk.DISABLED)
         self.save_quotation_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-    # quotation_management_window.py に prepare_new_quotation と save_quotation_data メソッドを追加
-
-    # quotation_management_window.py の prepare_new_quotation メソッド全体を置き換えてください
+        
+        # TODO: 必要であれば他のグローバルボタン (削除、印刷など) もここに追加
 
     def prepare_new_quotation(self):
-        # print("### prepare_new_quotation: START") # デバッグ用
+        # ★ もしヘッダー編集中なら、それを解除する
+        if getattr(self, '_is_editing_header', False):
+            self._is_editing_header = False
+            # 編集開始ボタンを有効に戻す (on_header_tree_selectで処理されるが、ここでも念のため)
+            if hasattr(self, 'start_edit_header_button'):
+                 self.start_edit_header_button.config(state=tk.DISABLED) # 新規準備中は編集開始は不可
+      
         self._preparing_new_quotation_flag = True # ★ フラグを立てる
         if hasattr(self, 'headers_tree'):
             self.headers_tree.unbind("<<TreeviewSelect>>") # ### 変更点: メソッドの最初に移動 ###
-            # print("### prepare_new_quotation: Unbound TreeviewSelect")
 
         self.selected_quotation_id = None 
 
         if hasattr(self, 'headers_tree') and self.headers_tree.selection():
             self.headers_tree.selection_remove(self.headers_tree.selection())
-            # print("### prepare_new_quotation: Called selection_remove()")
 
-        # print("### prepare_new_quotation: Clearing detail_vars to ''")
         for key in self.detail_vars:
             self.detail_vars[key].set("") 
 
@@ -301,125 +353,234 @@ class QuotationManagementWindow(tk.Toplevel):
         # --- メソッドの最後にイベントを再バインド ---
         if hasattr(self, 'headers_tree'):
             self.headers_tree.bind("<<TreeviewSelect>>", self.on_header_tree_select) # ### 変更点: メソッドの最後に移動 ###
-            # print("### prepare_new_quotation: Rebound TreeviewSelect at END")
 
-        # print("### prepare_new_quotation: END")
-    # quotation_management_window.py の save_quotation_data メソッドを修正・実装
+# quotation_management_window.py の QuotationManagementWindow クラス内
 
     def save_quotation_data(self):
-        # 現在は新規登録のみを想定 (self.selected_quotation_id が None の場合)
-        # TODO: 将来的には self.selected_quotation_id があれば更新処理に分岐
+        # --- ヘッダー編集モードでの更新処理 ---
+        if self.selected_quotation_id is not None and getattr(self, '_is_editing_header', False):
+            try:
+                quotation_id_to_update = self.selected_quotation_id
 
-        if self.selected_quotation_id is not None:
-            messagebox.showinfo("情報", "既存の見積の更新処理は未実装です。")
-            # ここで update_quotation のロジックを呼び出す (将来的に)
-            return
+                # フォームから編集されたデータを取得
+                project_id_str = self.detail_vars["project_id"].get().strip()
+                quotation_staff_id_str = self.detail_vars["quotation_staff_id"].get().strip()
+                quotation_code = self.detail_vars["quotation_code"].get().strip()
+                quotation_date = self.detail_vars["quotation_date"].get().strip()
+                customer_name_at_quote = self.detail_vars["customer_name_at_quote"].get().strip()
+                project_name_at_quote = self.detail_vars["project_name_at_quote"].get().strip()
+                site_address_at_quote = self.detail_vars["site_address_at_quote"].get().strip()
+                construction_period_notes = self.detail_vars["construction_period_notes"].get().strip()
+                tax_rate_str = self.detail_vars["tax_rate"].get().strip().replace('%', '') # %を除去
+                validity_period_notes = self.detail_vars["validity_period_notes"].get().strip()
+                payment_terms_notes = self.detail_vars["payment_terms_notes"].get().strip()
+                status = self.detail_vars["status"].get().strip()
+                remarks = self.detail_vars["remarks"].get().strip()
+
+                # 合計金額関連は readonly のため、現在の detail_vars からそのまま取得 (カンマ除去)
+                total_amount_exclusive_tax_str = self.detail_vars["total_amount_exclusive_tax"].get().replace(',', '')
+                tax_amount_str = self.detail_vars["tax_amount"].get().replace(',', '')
+                total_amount_inclusive_tax_str = self.detail_vars["total_amount_inclusive_tax"].get().replace(',', '')
+
+                # --- 入力値のバリデーション ---
+                if not project_id_str:
+                    messagebox.showerror("入力エラー", "元となる案件IDは必須です。", parent=self)
+                    self.header_form_entries.get("project_id", {}).focus_set() # .getで安全にアクセス
+                    return
+                if not quotation_code:
+                    messagebox.showerror("入力エラー", "見積番号は必須です。", parent=self)
+                    self.header_form_entries["quotation_code"].focus_set()
+                    return
+                if not quotation_date:
+                    messagebox.showerror("入力エラー", "見積日は必須です。", parent=self)
+                    self.header_form_entries["quotation_date"].focus_set()
+                    return
+                if not customer_name_at_quote:
+                    messagebox.showerror("入力エラー", "宛名は必須です。", parent=self)
+                    self.header_form_entries["customer_name_at_quote"].focus_set()
+                    return
+                if not project_name_at_quote:
+                    messagebox.showerror("入力エラー", "件名は必須です。", parent=self)
+                    self.header_form_entries["project_name_at_quote"].focus_set()
+                    return
+                if not status: # 状況も必須とする場合
+                    messagebox.showerror("入力エラー", "状況は必須です。", parent=self)
+                    self.header_form_entries["status"].focus_set()
+                    return
+
+
+                # --- データ型の変換 ---
+                project_id = int(project_id_str)
+                quotation_staff_id = int(quotation_staff_id_str) if quotation_staff_id_str.isdigit() else None # isdigitで数値か確認
+                
+                tax_rate_for_db = 0.0
+                if tax_rate_str:
+                    try:
+                        tax_rate_for_db = float(tax_rate_str) / 100.0
+                    except ValueError:
+                        messagebox.showerror("入力エラー", "税率には数値を入力してください。", parent=self)
+                        self.header_form_entries["tax_rate"].focus_set()
+                        return
+                
+                total_amount_exclusive_tax = int(total_amount_exclusive_tax_str) if total_amount_exclusive_tax_str.isdigit() else 0
+                tax_amount = int(tax_amount_str) if tax_amount_str.isdigit() else 0
+                total_amount_inclusive_tax = int(total_amount_inclusive_tax_str) if total_amount_inclusive_tax_str.isdigit() else 0
+                
+                # データベースを更新
+                update_result = self.db_ops.update_quotation(
+                    quotation_id=quotation_id_to_update,
+                    project_id=project_id, 
+                    quotation_staff_id=quotation_staff_id, 
+                    quotation_code=quotation_code, 
+                    quotation_date=quotation_date,
+                    customer_name_at_quote=customer_name_at_quote, 
+                    project_name_at_quote=project_name_at_quote, 
+                    site_address_at_quote=site_address_at_quote,
+                    construction_period_notes=construction_period_notes, 
+                    total_amount_exclusive_tax=total_amount_exclusive_tax,
+                    tax_rate=tax_rate_for_db,
+                    tax_amount=tax_amount,
+                    total_amount_inclusive_tax=total_amount_inclusive_tax,
+                    validity_period_notes=validity_period_notes,
+                    payment_terms_notes=payment_terms_notes, 
+                    status=status, 
+                    remarks=remarks
+                )
+
+                if update_result is True:
+                    messagebox.showinfo("更新成功", f"見積「{quotation_code}」を更新しました。", parent=self)
+                    
+                    current_selection_id = str(self.selected_quotation_id) # Treeviewのiidは文字列の場合がある
+                    self.load_quotation_headers_to_treeview() 
+                    
+                    if current_selection_id and hasattr(self, 'headers_tree') and self.headers_tree.exists(current_selection_id):
+                        self.headers_tree.selection_set(current_selection_id)
+                        self.headers_tree.focus(current_selection_id)
+                        # on_header_tree_select がトリガーされ、フォームのreadonly化とボタン状態更新が行われる
+                    else:
+                        # もし再選択に失敗した場合は、新規準備状態に戻すか、エラー表示など
+                        self.prepare_new_quotation() 
+
+                    self._is_editing_header = False 
+                    # new_quotation_button は on_header_tree_select で通常状態に戻るはず
+                    # start_edit_header_button も on_header_tree_select で通常状態に戻るはず
+                    # save_quotation_button も on_header_tree_select で無効になるはず
+
+                elif update_result == "DUPLICATE_QUOTATION_CODE":
+                    messagebox.showerror("更新エラー", f"見積番号「{quotation_code}」は既に他の見積で使用されています。", parent=self)
+                    self.header_form_entries["quotation_code"].focus_set()
+                elif update_result == "NOT_FOUND":
+                     messagebox.showerror("更新エラー", f"更新対象の見積 (ID: {quotation_id_to_update}) が見つかりませんでした。", parent=self)
+                elif update_result == "NOT_NULL_VIOLATION":
+                     messagebox.showerror("更新エラー", "必須項目が入力されていません。", parent=self)
+                elif update_result == "FK_CONSTRAINT_FAILED":
+                     messagebox.showerror("更新エラー", "指定された案件IDまたは見積担当者IDが存在しません。", parent=self)
+                else: # INTEGRITY_ERROR, CONNECTION_ERROR, OTHER_DB_ERROR など
+                    messagebox.showerror("更新エラー", f"データベースエラーにより見積情報の更新に失敗しました。({update_result})", parent=self)
+
+            except ValueError as ve: # 主に int() や float() の変換エラー
+                messagebox.showerror("入力エラー", f"数値項目の入力値が正しくありません。\n詳細: {ve}", parent=self)
+            except Exception as e:
+                messagebox.showerror("システムエラー", f"予期せぬエラーが発生しました: {e}", parent=self)
+            finally:
+                self.lift()
 
         # --- 新規見積ヘッダーの保存処理 ---
-        try:
-            # フォームのStringVarから値を取得
-            project_id_str = self.detail_vars["project_id"].get().strip()
-            quotation_staff_id_str = self.detail_vars["quotation_staff_id"].get().strip() # 注意: これは表示名はstaff_nameだが、IDを保持する想定
-            
-            quotation_code = self.detail_vars["quotation_code"].get().strip()
-            quotation_date = self.detail_vars["quotation_date"].get().strip()
-            customer_name_at_quote = self.detail_vars["customer_name_at_quote"].get().strip()
-            project_name_at_quote = self.detail_vars["project_name_at_quote"].get().strip()
-            
-            site_address_at_quote = self.detail_vars["site_address_at_quote"].get().strip()
-            construction_period_notes = self.detail_vars["construction_period_notes"].get().strip()
-            
-            # 金額関連は、明細がない新規ヘッダーの場合、初期値は0か手入力された値
-            # ここでは手入力されたものとして取得 (バリデーションと型変換が必要)
-            total_amount_exclusive_tax_str = self.detail_vars["total_amount_exclusive_tax"].get().strip()
-            tax_rate_str = self.detail_vars["tax_rate"].get().strip().replace('%', '') # %を除去
-            tax_amount_str = self.detail_vars["tax_amount"].get().strip()
-            total_amount_inclusive_tax_str = self.detail_vars["total_amount_inclusive_tax"].get().strip()
-            
-            validity_period_notes = self.detail_vars["validity_period_notes"].get().strip()
-            payment_terms_notes = self.detail_vars["payment_terms_notes"].get().strip()
-            status = self.detail_vars["status"].get().strip()
-            remarks = self.detail_vars["remarks"].get().strip()
+        elif self.selected_quotation_id is None and not getattr(self, '_is_editing_header', False):
+            try:
+                project_id_str = self.detail_vars["project_id"].get().strip()
+                quotation_staff_id_str = self.detail_vars["quotation_staff_id"].get().strip()
+                quotation_code = self.detail_vars["quotation_code"].get().strip()
+                quotation_date = self.detail_vars["quotation_date"].get().strip()
+                customer_name_at_quote = self.detail_vars["customer_name_at_quote"].get().strip()
+                project_name_at_quote = self.detail_vars["project_name_at_quote"].get().strip()
+                site_address_at_quote = self.detail_vars["site_address_at_quote"].get().strip()
+                construction_period_notes = self.detail_vars["construction_period_notes"].get().strip()
+                tax_rate_str = self.detail_vars["tax_rate"].get().strip().replace('%', '')
+                validity_period_notes = self.detail_vars["validity_period_notes"].get().strip()
+                payment_terms_notes = self.detail_vars["payment_terms_notes"].get().strip()
+                status = self.detail_vars["status"].get().strip()
+                remarks = self.detail_vars["remarks"].get().strip()
+                
+                # 新規作成時は、これらの合計金額は明細がないため0か、手入力（ただしフォームではreadonlyなので通常0）
+                # recalculate_and_update_quotation_totals で再計算されることを期待するが、
+                # add_quotation 関数に渡す初期値としては0を設定しておく。
+                # フォームの readonly の値を使う場合（通常は"0"のはず）
+                total_amount_exclusive_tax_str = self.detail_vars["total_amount_exclusive_tax"].get().replace(',', '')
+                # tax_amount_str = self.detail_vars["tax_amount"].get().replace(',', '') # 新規時は計算するので不要
+                # total_amount_inclusive_tax_str = self.detail_vars["total_amount_inclusive_tax"].get().replace(',', '') # 新規時は計算するので不要
 
-            # --- 入力値のバリデーション ---
-            if not project_id_str:
-                messagebox.showerror("入力エラー", "元となる案件IDは必須です。")
-                # self.header_form_entries["project_id"].focus_set() # project_id用のEntryがあれば
-                return
-            if not quotation_code:
-                messagebox.showerror("入力エラー", "見積番号は必須です。")
-                self.header_form_entries["quotation_code"].focus_set()
-                return
-            if not quotation_date: # YYYY-MM-DD形式のチェックも本当は必要
-                messagebox.showerror("入力エラー", "見積日は必須です。")
-                self.header_form_entries["quotation_date"].focus_set()
-                return
-            if not customer_name_at_quote:
-                messagebox.showerror("入力エラー", "宛名は必須です。")
-                self.header_form_entries["customer_name_at_quote"].focus_set()
-                return
-            if not project_name_at_quote:
-                messagebox.showerror("入力エラー", "件名は必須です。")
-                self.header_form_entries["project_name_at_quote"].focus_set()
-                return
+                # バリデーション (更新時と同様)
+                if not project_id_str:
+                    messagebox.showerror("入力エラー", "元となる案件IDは必須です。", parent=self); return
+                if not quotation_code:
+                    messagebox.showerror("入力エラー", "見積番号は必須です。", parent=self); self.header_form_entries["quotation_code"].focus_set(); return
+                if not quotation_date:
+                    messagebox.showerror("入力エラー", "見積日は必須です。", parent=self); self.header_form_entries["quotation_date"].focus_set(); return
+                if not customer_name_at_quote:
+                    messagebox.showerror("入力エラー", "宛名は必須です。", parent=self); self.header_form_entries["customer_name_at_quote"].focus_set(); return
+                if not project_name_at_quote:
+                    messagebox.showerror("入力エラー", "件名は必須です。", parent=self); self.header_form_entries["project_name_at_quote"].focus_set(); return
+                if not status: # 状況も必須とする場合
+                    messagebox.showerror("入力エラー", "状況は必須です。", parent=self); self.header_form_entries["status"].focus_set(); return
 
-            # --- データ型の変換 ---
-            project_id = int(project_id_str)
-            quotation_staff_id = int(quotation_staff_id_str) if quotation_staff_id_str else None
-            
-            # 金額関連 (明細がない新規ヘッダーなので、当面は手入力か0)
-            total_amount_exclusive_tax = int(total_amount_exclusive_tax_str) if total_amount_exclusive_tax_str else 0
-            tax_rate_for_db = 0.0 # デフォルト値
-            if tax_rate_str:
-                try:
-                    tax_rate_for_db = float(tax_rate_str) / 100.0 # 例: "10" -> 0.1
-                except ValueError:
-                    messagebox.showerror("入力エラー", "税率には数値を入力してください。"); return
-            
-            # 明細がない新規ヘッダーの場合、税額と税込合計は手入力された値か、税抜と税率から計算
-            # (ここでは、再計算ロジックに任せるか、手入力値を優先するか選べるが、
-            #  recalculate_and_update_quotation_totals で計算されるので、ここでは初期値0でも良い)
-            tax_amount = 0
-            total_amount_inclusive_tax = total_amount_exclusive_tax # 税抜と同額（税0の場合）
+                # データ型変換 (更新時と同様)
+                project_id = int(project_id_str)
+                quotation_staff_id = int(quotation_staff_id_str) if quotation_staff_id_str.isdigit() else None
+                
+                total_amount_exclusive_tax_for_db = int(total_amount_exclusive_tax_str) if total_amount_exclusive_tax_str.isdigit() else 0
+                
+                tax_rate_for_db = 0.0
+                if tax_rate_str:
+                    try:
+                        tax_rate_for_db = float(tax_rate_str) / 100.0
+                    except ValueError:
+                        messagebox.showerror("入力エラー", "税率には数値を入力してください。", parent=self); self.header_form_entries["tax_rate"].focus_set(); return
+                
+                # 新規登録時は、明細がないため、税額と税込合計は税抜と税率から計算
+                tax_amount_for_db = int(total_amount_exclusive_tax_for_db * tax_rate_for_db)
+                total_amount_inclusive_tax_for_db = total_amount_exclusive_tax_for_db + tax_amount_for_db
 
-            # もしフォームに税額や税込合計が手入力されていれば、それを使うことも可能
-            # if tax_amount_str: tax_amount = int(tax_amount_str)
-            # if total_amount_inclusive_tax_str: total_amount_inclusive_tax = int(total_amount_inclusive_tax_str)
-            # else: # 手入力がなければ、計算する
-            if total_amount_exclusive_tax is not None and tax_rate_for_db is not None:
-                 tax_amount = int(total_amount_exclusive_tax * tax_rate_for_db) # 小数点以下切り捨て
-                 total_amount_inclusive_tax = total_amount_exclusive_tax + tax_amount
+                result = self.db_ops.add_quotation(
+                    project_id, quotation_staff_id, quotation_code, quotation_date,
+                    customer_name_at_quote, project_name_at_quote, site_address_at_quote,
+                    construction_period_notes, total_amount_exclusive_tax_for_db, tax_rate_for_db,
+                    tax_amount_for_db, total_amount_inclusive_tax_for_db, validity_period_notes,
+                    payment_terms_notes, status, remarks
+                )
 
-            # データベースに追加
-            result = self.db_ops.add_quotation(
-                project_id, quotation_staff_id, quotation_code, quotation_date,
-                customer_name_at_quote, project_name_at_quote, site_address_at_quote,
-                construction_period_notes, total_amount_exclusive_tax, tax_rate_for_db,
-                tax_amount, total_amount_inclusive_tax, validity_period_notes,
-                payment_terms_notes, status, remarks
-            )
+                if isinstance(result, int): 
+                    new_quotation_id = result
+                    messagebox.showinfo("登録成功", f"見積「{quotation_code}」を登録しました。(ID: {new_quotation_id})", parent=self)
+                    self.load_quotation_headers_to_treeview() 
+                    
+                    # 新規登録したアイテムを選択状態にする
+                    if hasattr(self, 'headers_tree') and self.headers_tree.exists(str(new_quotation_id)):
+                        self.headers_tree.selection_set(str(new_quotation_id))
+                        self.headers_tree.focus(str(new_quotation_id))
+                        # on_header_tree_select が呼ばれ、フォームがreadonlyになり、ボタン状態も更新される
+                    else: # 念のため、再選択できなかった場合は新規準備状態へ
+                        self.prepare_new_quotation()
+                
+                elif result == "DUPLICATE_QUOTATION_CODE":
+                    messagebox.showerror("登録エラー", f"見積番号「{quotation_code}」は既に登録されています。", parent=self)
+                    self.header_form_entries["quotation_code"].focus_set()
+                elif result == "NOT_NULL_VIOLATION":
+                    messagebox.showerror("登録エラー", "必須項目が入力されていません。", parent=self)
+                elif result == "FK_CONSTRAINT_FAILED":
+                    messagebox.showerror("登録エラー", "指定された案件IDまたは見積担当者IDが存在しません。", parent=self)
+                else: 
+                    messagebox.showerror("登録エラー", f"データベースエラーにより見積情報の登録に失敗しました。({result})", parent=self)
 
-            if isinstance(result, int): # 成功 (新しい quotation_id が返る)
-                messagebox.showinfo("登録成功", f"見積「{quotation_code}」を登録しました。(ID: {result})")
-                self.load_quotation_headers_to_treeview() # ヘッダー一覧を更新
-                # 新規登録後、フォームをクリアし、選択状態をリセット
-                self.prepare_new_quotation() # これによりフォームは再度入力可能状態になる
-                # または、登録した情報を表示してreadonlyにする場合は別途処理
-                self.save_quotation_button.config(state=tk.DISABLED) # 保存後は一旦無効化
-            elif result == "DUPLICATE_QUOTATION_CODE":
-                messagebox.showerror("登録エラー", f"見積番号「{quotation_code}」は既に登録されています。")
-                self.header_form_entries["quotation_code"].focus_set()
-            elif result == "NOT_NULL_VIOLATION":
-                messagebox.showerror("登録エラー", "必須項目が入力されていません。")
-            elif result == "FK_CONSTRAINT_FAILED":
-                messagebox.showerror("登録エラー", "指定された案件IDまたは見積担当者IDが存在しません。")
-            else: # INTEGRITY_ERROR, CONNECTION_ERROR, OTHER_DB_ERROR など
-                messagebox.showerror("登録エラー", f"データベースエラーにより見積情報の登録に失敗しました。({result})")
-
-        except ValueError as ve:
-            messagebox.showerror("入力エラー", f"数値項目（案件ID、担当者ID、金額、税率など）の入力値が正しくありません。\n{ve}")
-        except Exception as e:
-            messagebox.showerror("エラー", f"予期せぬエラーが発生しました: {e}")
+            except ValueError as ve:
+                messagebox.showerror("入力エラー", f"数値項目（案件ID、担当者ID、金額、税率など）の入力値が正しくありません。\n詳細: {ve}", parent=self)
+            except Exception as e:
+                messagebox.showerror("システムエラー", f"予期せぬエラーが発生しました: {e}", parent=self)
+            finally:
+                self.lift()
+        else:
+            messagebox.showwarning("不正な操作", "保存処理を実行するための条件が満たされていません。\n(選択IDなし、または編集中ではない可能性があります)", parent=self)
+            self.lift()
 
     def load_quotation_headers_to_treeview(self):
         """データベースから見積ヘッダー情報を読み込み、左側のTreeviewに表示する"""
@@ -466,49 +627,49 @@ class QuotationManagementWindow(tk.Toplevel):
                 self.headers_tree.insert("", tk.END, values=display_values, iid=q_header_tuple[0])
         # else:
             # messagebox.showinfo("情報", "登録されている見積情報はありません。") # 必要に応じて
-        
-
-# quotation_management_window.py の QuotationManagementWindow クラス内
-
     def on_header_tree_select(self, event):
-        # unbind/bind方式を採用しているため、_is_preparing_new フラグのチェックは不要
-        # ★ 新規見積準備中フラグが立っているか確認
         if getattr(self, '_preparing_new_quotation_flag', False):
-            self._preparing_new_quotation_flag = False # フラグを消費 (リセット)
-            # 新規準備中の副作用でこのイベントが呼ばれた場合は、
-            # フォームのクリアやボタンの無効化は行わない
+            self._preparing_new_quotation_flag = False
             return 
+
+        # ★ ヘッダー編集中だった場合は、編集モードを解除する (選択変更によるキャンセル扱い)
+        if getattr(self, '_is_editing_header', False):
+            self._is_editing_header = False
+            # 保存ボタンなどを元に戻す処理もここで行うか、
+            # フォーム読み込み後に状態設定する部分でまとめて行う。
+            # ここではフラグのリセットのみに留め、後続の処理でフォームはreadonlyになる。
+            if hasattr(self, 'save_quotation_button'):
+                self.save_quotation_button.config(state="disabled")
+            if hasattr(self, 'new_quotation_button'):
+                 self.new_quotation_button.config(state="normal")
+
+
         selected_items = self.headers_tree.selection()
-        # print(f"### on_header_tree_select: Selected items: {selected_items}") # デバッグ用
 
         if not selected_items:
             self.selected_quotation_id = None
-            # print("### on_header_tree_select: No items selected, clearing detail_vars") # デバッグ用
             for key in self.detail_vars:
-                self.detail_vars[key].set("") # 「---」ではなく空文字列でクリア
+                self.detail_vars[key].set("")
             
             if hasattr(self, 'items_tree') and self.items_tree: 
-                self.load_selected_quotation_items(None) # 明細一覧もクリア
+                self.load_selected_quotation_items(None)
             
-            # 関連ボタンの状態更新
             if hasattr(self, 'save_quotation_button'): 
                 self.save_quotation_button.config(state=tk.DISABLED)
-            if hasattr(self, 'add_item_button'): # 明細追加ボタン
+            if hasattr(self, 'add_item_button'):
                 self.add_item_button.config(state=tk.DISABLED)
-            if hasattr(self, 'edit_item_button'): # 明細編集ボタン (もしあれば)
+            if hasattr(self, 'edit_item_button'):
                 self.edit_item_button.config(state=tk.DISABLED)
-            if hasattr(self, 'delete_item_button'): # 明細削除ボタン (もしあれば)
+            if hasattr(self, 'delete_item_button'):
                 self.delete_item_button.config(state=tk.DISABLED)
-            # QuotationManagementWindow に直接 update_button や delete_button がある場合はそれらも無効化
-            # (通常、これらは明細用か、別途「見積ヘッダー編集開始」のようなボタンで制御)
+            if hasattr(self, 'start_edit_header_button'): # ★追加
+                self.start_edit_header_button.config(state=tk.DISABLED)
             return
         
         selected_iid = selected_items[0] 
         self.selected_quotation_id = selected_iid
-        # print(f"### on_header_tree_select: Selected quotation_id: {self.selected_quotation_id}") # デバッグ用
         
         header_data = self.db_ops.get_quotation_by_id(self.selected_quotation_id)
-        # print(f"### on_header_tree_select: Fetched header_data: {header_data is not None}") # デバッグ用
  
         if header_data:
             # フォームのStringVarに値をセット
@@ -540,9 +701,13 @@ class QuotationManagementWindow(tk.Toplevel):
             
             # ボタンの状態更新
             if hasattr(self, 'save_quotation_button'): 
-                self.save_quotation_button.config(state=tk.DISABLED) # 選択時は保存不可（編集モードで有効化）
+                if not getattr(self, '_is_editing_header', False):
+                    self.save_quotation_button.config(state=tk.DISABLED)
             if hasattr(self, 'add_item_button'): 
                 self.add_item_button.config(state=tk.NORMAL) # 見積ヘッダー選択時は明細追加を可能に
+            if hasattr(self, 'start_edit_header_button'): # ★追加
+                self.start_edit_header_button.config(state=tk.NORMAL) # ヘッダー選択時は編集開始ボタンを有効化
+
             # TODO: 「ヘッダー編集開始」ボタンなどを有効化
             # TODO: 「ヘッダー削除」ボタンなども有効化
             
@@ -558,6 +723,8 @@ class QuotationManagementWindow(tk.Toplevel):
             # ボタンの状態更新
             if hasattr(self, 'save_quotation_button'): self.save_quotation_button.config(state=tk.DISABLED)
             if hasattr(self, 'add_item_button'): self.add_item_button.config(state=tk.DISABLED)
+            if hasattr(self, 'start_edit_header_button'): self.start_edit_header_button.config(state=tk.DISABLED)
+
     def _create_items_treeview(self, parent_frame):
         # ### 変更点: 表示カラムの変更 ###
         columns = (
@@ -687,10 +854,6 @@ class QuotationManagementWindow(tk.Toplevel):
             else:
                 messagebox.showerror("エラー", f"明細の追加に失敗しました: {new_item_id_or_error}", parent=self)
         self.lift()
-        # quotation_management_window.py の QuotationManagementWindow クラス内
-# quotation_management_window.py の recalculate_and_update_quotation_totals メソッドを修正
-
-# quotation_management_window.py の QuotationManagementWindow クラス内
 
     def recalculate_and_update_quotation_totals(self, quotation_id):
         print(f"### DEBUG: recalculate_totals CALLED for quotation_id: {quotation_id}")
@@ -764,19 +927,135 @@ class QuotationManagementWindow(tk.Toplevel):
             )
             if update_result is True:
                 print(f"### DEBUG: Quotation ID {quotation_id} totals updated in DB.")
-                self.load_quotation_headers_to_treeview() 
+                # self.load_quotation_headers_to_treeview() # ← この行をコメントアウトまたは削除
+
+                # headers_tree の該当行の表示を更新する
+                if hasattr(self, 'headers_tree') and self.selected_quotation_id:
+                    try:
+                        # 現在のTreeviewの行から表示されている値を取得
+                        current_values = list(self.headers_tree.item(self.selected_quotation_id, 'values'))
+                        # 更新された合計金額(税込)を取得 (フォームのStringVarから)
+                        new_total_inclusive_tax_str = self.detail_vars["total_amount_inclusive_tax"].get()
+                        
+                        # headers_treeのカラム定義を確認し、"total_amount_inclusive_tax" が何番目のカラムか特定
+                        # columns = ("quotation_id", "quotation_code", "quotation_date", "customer_name_at_quote", 
+                        #            "project_name_at_quote", "total_amount_inclusive_tax", "status", "staff_name")
+                        # 上記定義だと、"total_amount_inclusive_tax" は 5番目 (0から数えて) のカラム
+                        total_amount_column_index = 5 # このインデックスは実際のカラム定義に合わせてください
+
+                        if len(current_values) > total_amount_column_index:
+                            current_values[total_amount_column_index] = new_total_inclusive_tax_str
+                            self.headers_tree.item(self.selected_quotation_id, values=tuple(current_values))
+                            print(f"### DEBUG: Updated headers_tree row for ID {self.selected_quotation_id} with new total.")
+                        else:
+                            print(f"### WARNING: Could not update headers_tree row. Index out of bounds or values issue.")
+                    except Exception as e:
+                        print(f"### ERROR: Failed to update headers_tree row: {e}")
+                # 他に一覧表示されていて更新が必要な項目があれば同様に更新
             else:
                 messagebox.showerror("エラー", f"見積合計金額のDB更新に失敗しました: {update_result}", parent=self)
                 print(f"### DEBUG: DB update failed for totals: {update_result}")
-        # else は上で処理済み(current_header_data_for_tax_info がなければreturnしているため)
+
     def open_edit_item_dialog(self):
-        # (選択された明細のデータをダイアログに渡して開く処理 - 後で実装)
-        messagebox.showinfo("未実装", "明細編集ダイアログは未実装です。", parent=self)
-        self.lift()
+        selected_item_refs = self.items_tree.selection()
+        if not selected_item_refs:
+            messagebox.showwarning("未選択", "編集する明細が選択されていません。", parent=self)
+            self.lift() # ダイアログが他のウィンドウの後ろに隠れるのを防ぐ
+            return
+
+        selected_item_id = selected_item_refs[0] # iid が item_id になっているはず
+
+        # データベースから選択された明細の現在のデータを取得
+        item_to_edit = self.db_ops.get_quotation_item_by_id(selected_item_id)
+
+        if not item_to_edit:
+            messagebox.showerror("エラー", f"選択された明細 (ID: {selected_item_id}) のデータ取得に失敗しました。", parent=self)
+            self.lift()
+            return
+
+        # QuotationItemDialog を編集モードで開く
+        # item_data に取得した明細データを渡し、quotation_id も渡す
+        dialog = QuotationItemDialog(
+            self, 
+            title="見積明細 - 編集", 
+            item_data=item_to_edit, 
+            quotation_id=self.selected_quotation_id # 現在のヘッダーのID
+        )
+
+        if dialog.result: # ダイアログで「保存」が押された場合
+            edited_item_data = dialog.result 
+            # dialog.result には item_id も含まれているはず (QuotationItemDialog の on_save で設定)
+            
+            # display_order はダイアログで編集していないので、元の値をそのまま使う
+            # item_to_edit 辞書から display_order を取得
+            current_display_order = item_to_edit.get("display_order") 
+            # もし display_order も編集可能にするなら、dialog.result に含める必要がある
+
+            update_success_or_error = self.db_ops.update_quotation_item(
+                item_id=edited_item_data["item_id"], # dialog.result から item_id を取得
+                display_order=current_display_order, # 元の display_order を使用
+                name=edited_item_data["name"],
+                specification=edited_item_data["specification"],
+                quantity=edited_item_data["quantity"],
+                unit=edited_item_data["unit"],
+                unit_price=edited_item_data["unit_price"],
+                amount=edited_item_data["amount"], # dialog.result で計算済み
+                remarks=edited_item_data["remarks"]
+            )
+
+            if update_success_or_error is True:
+                messagebox.showinfo("成功", "見積明細を更新しました。", parent=self)
+                self.load_selected_quotation_items(self.selected_quotation_id) # 明細一覧を再読み込み
+                self.recalculate_and_update_quotation_totals(self.selected_quotation_id) # 合計金額を再計算・更新
+            else:
+                messagebox.showerror("エラー", f"明細の更新に失敗しました: {update_success_or_error}", parent=self)
+        
+        self.lift() # メインウィンドウを前面に表示し直す
+
 
     def delete_selected_item(self):
-        # (選択された明細を削除する処理 - 後で実装)
-        messagebox.showinfo("未実装", "明細削除処理は未実装です。", parent=self)
+        selected_item_refs = self.items_tree.selection() # items_tree から選択中のアイテムを取得
+        if not selected_item_refs:
+            messagebox.showwarning("未選択", "削除する明細が選択されていません。", parent=self)
+            self.lift()
+            return
+
+        selected_item_id = selected_item_refs[0] # iid が item_id になっているはず
+
+        # ユーザーに削除確認
+        # 選択されたアイテムの情報を少し表示して確認を促すとより親切です。
+        # 例えば、item_id から名称などを取得してメッセージに含めるなど。
+        # ここでは item_id のみで確認します。
+        item_values = self.items_tree.item(selected_item_id, 'values')
+        item_name_to_confirm = item_values[1] if len(item_values) > 1 else f"ID {selected_item_id}" # "name" カラムが2番目(インデックス1)と想定
+
+        confirm_message = f"明細「{item_name_to_confirm}」(ID: {selected_item_id}) を本当に削除しますか？"
+        if not messagebox.askyesno("削除確認", confirm_message, parent=self):
+            self.lift()
+            return
+
+        # データベースから明細を削除
+        delete_result = self.db_ops.delete_quotation_item(selected_item_id)
+
+        if delete_result is True:
+            messagebox.showinfo("成功", f"明細 (ID: {selected_item_id}) を削除しました。", parent=self)
+            # 明細一覧を再読み込みして表示を更新
+            self.load_selected_quotation_items(self.selected_quotation_id)
+            # 見積もり全体の合計金額を再計算・DB更新・フォーム表示更新
+            self.recalculate_and_update_quotation_totals(self.selected_quotation_id)
+            
+            # 削除後、明細編集・削除ボタンを非アクティブにする
+            # (load_selected_quotation_items の後、選択がクリアされるか、
+            #  on_item_tree_select が適切に呼ばれていれば自動的に更新されるはずですが、念のため)
+            if hasattr(self, 'edit_item_button'):
+                self.edit_item_button.config(state=tk.DISABLED)
+            if hasattr(self, 'delete_item_button'):
+                self.delete_item_button.config(state=tk.DISABLED)
+        elif delete_result == "NOT_FOUND":
+            messagebox.showerror("エラー", f"削除対象の明細 (ID: {selected_item_id}) が見つかりませんでした。", parent=self)
+        else: # CONNECTION_ERROR や OTHER_DB_ERROR など
+            messagebox.showerror("エラー", f"明細の削除に失敗しました: {delete_result}", parent=self)
+        
         self.lift()
 
     def on_close(self):
@@ -842,14 +1121,36 @@ class QuotationItemDialog(tk.Toplevel):
         ttk.Button(button_frame, text="保存", command=self.on_save).pack(side=tk.RIGHT, padx=5)
         
         # 編集モードなら既存データをフォームにセット (今回は新規追加なのでこの部分はまだ使わない)
+        # 編集モードなら既存データをフォームにセット
         if self.item_data:
-            self.string_vars["display_order"].set(self.item_data.get("display_order", ""))
-            self.string_vars["name"].set(self.item_data.get("name", ""))
-            self.entries["specification"].insert("1.0", self.item_data.get("specification", ""))
-            self.string_vars["quantity"].set(str(self.item_data.get("quantity", "")))
-            self.string_vars["unit"].set(self.item_data.get("unit", ""))
-            self.string_vars["unit_price"].set(str(self.item_data.get("unit_price", "")))
-            self.entries["remarks"].insert("1.0", self.item_data.get("remarks", ""))
+            # self.item_data は get_quotation_item_by_id から返された辞書を想定
+            self.title(title if title else "見積明細 - 編集") # 編集時はタイトルも変更 (任意)
+
+            # 各StringVarに値をセット
+            if "name" in self.string_vars and "name" in self.item_data:
+                self.string_vars["name"].set(self.item_data.get("name", ""))
+            
+            # quantity, unit, unit_price は数値かもしれないので文字列に変換してセット
+            if "quantity" in self.string_vars and "quantity" in self.item_data:
+                self.string_vars["quantity"].set(str(self.item_data.get("quantity", "")))
+            
+            if "unit" in self.string_vars and "unit" in self.item_data:
+                self.string_vars["unit"].set(self.item_data.get("unit", ""))
+
+            if "unit_price" in self.string_vars and "unit_price" in self.item_data:
+                self.string_vars["unit_price"].set(str(self.item_data.get("unit_price", "")))
+
+            # Textウィジェットに値をセット
+            if "specification" in self.entries and "specification" in self.item_data:
+                self.entries["specification"].delete("1.0", tk.END) # 既存の内容をクリア
+                self.entries["specification"].insert("1.0", self.item_data.get("specification", ""))
+            
+            if "remarks" in self.entries and "remarks" in self.item_data:
+                self.entries["remarks"].delete("1.0", tk.END) # 既存の内容をクリア
+                self.entries["remarks"].insert("1.0", self.item_data.get("remarks", ""))
+            
+            # display_order はダイアログで編集しないので、ここではセット不要
+            # self.string_vars["display_order"].set(self.item_data.get("display_order", "")) # ← この行は不要
 
         self.entries["name"].focus_set() # 初期フォーカスを名称に
         

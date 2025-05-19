@@ -1,12 +1,9 @@
 import sqlite3
 from datetime import datetime
-
 DATABASE_FILE = "komuten_kanri.db" # データベースファイル名
-
 def get_current_timestamp():
     """現在の日時をYYYY-MM-DD HH:MM:SS形式の文字列で返す"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
 def create_connection(db_file=DATABASE_FILE):
     """データベースファイルへの接続を作成し、外部キーを有効にする"""
     conn = None
@@ -16,9 +13,7 @@ def create_connection(db_file=DATABASE_FILE):
     except sqlite3.Error as e:
         print(f"Error connecting to database: {e}")
     return conn
-
 # --- 顧客 (Customers) テーブル操作 ---
-
 def add_customer(customer_name, contact_person_name, phone_number, email, address, notes):
     """新しい顧客をデータベースに追加する"""
     conn = create_connection()
@@ -50,7 +45,6 @@ def add_customer(customer_name, contact_person_name, phone_number, email, addres
     finally:
         if conn:
             conn.close()
-
 def get_all_customers():
     """全ての顧客情報をデータベースから取得する"""
     conn = create_connection()
@@ -73,7 +67,6 @@ def get_all_customers():
     finally:
         if conn:
             conn.close()
-
 def get_customer_by_id(customer_id):
     """指定されたIDの顧客情報を取得する"""
     conn = create_connection()
@@ -90,7 +83,6 @@ def get_customer_by_id(customer_id):
     finally:
         if conn:
             conn.close()
-
 def update_customer(customer_id, customer_name, contact_person_name, phone_number, email, address, notes):
     """顧客情報を更新する"""
     conn = create_connection()
@@ -131,7 +123,6 @@ def update_customer(customer_id, customer_name, contact_person_name, phone_numbe
     finally:
         if conn:
             conn.close()
-
 # database_operations.py の delete_customer 関数
 def delete_customer(customer_id):
     """顧客情報を削除する"""
@@ -161,10 +152,8 @@ def delete_customer(customer_id):
     finally:
         if conn:
             conn.close()
-
 # --- (将来的にここへ案件テーブルなどの操作関数も追加していく) ---
 # --- 案件 (Projects) テーブル操作 ---
-
 def add_project(project_code, project_name, customer_id, parent_project_id, 
                 site_address, reception_date, start_date_scheduled, 
                 completion_date_scheduled, actual_completion_date, 
@@ -212,16 +201,11 @@ def add_project(project_code, project_name, customer_id, parent_project_id,
     finally:
         if conn:
             conn.close()
-
 # database_operations.py に追記 (add_project 関数の後など)
 # database_operations.py に追記
-
 # --- 社員 (Employees) テーブル操作 ---
-
 # database_operations.py に追記
-
 # --- 社員 (Employees) テーブル操作 ---
-
 def add_employee(employee_code, full_name, name_kana, ccus_id, date_of_birth, gender,
                  position, address, phone_number, job_title, employment_date,
                  experience_years_trade, emergency_contact_name, emergency_contact_phone,
@@ -284,7 +268,6 @@ def add_employee(employee_code, full_name, name_kana, ccus_id, date_of_birth, ge
         if conn:
             conn.close()
 # database_operations.py に追記 (add_employee 関数の後など)
-
 def get_all_employees():
     """全ての社員情報をデータベースから取得する"""
     conn = create_connection()
@@ -321,7 +304,6 @@ def get_all_employees():
         if conn:
             conn.close()
 # database_operations.py に追記 (get_all_employees 関数の後など)
-
 def get_employee_by_id(employee_id):
     """指定されたIDの社員情報をデータベースから取得する"""
     conn = create_connection()
@@ -355,7 +337,6 @@ def get_employee_by_id(employee_id):
         if conn:
             conn.close()
 # database_operations.py に追記 (get_employee_by_id 関数の後など)
-
 def update_employee(employee_id, employee_code, full_name, name_kana, ccus_id, 
                     date_of_birth, gender, position, address, phone_number, 
                     job_title, employment_date, experience_years_trade, 
@@ -422,7 +403,6 @@ def update_employee(employee_id, employee_code, full_name, name_kana, ccus_id,
         if conn:
             conn.close()
 # database_operations.py に追記 (update_employee 関数の後など)
-
 def delete_employee(employee_id):
     """指定されたIDの社員情報を削除する"""
     conn = create_connection()
@@ -490,9 +470,7 @@ def get_all_projects():
     finally:
         if conn:
             conn.close()
-
 # database_operations.py に追記 (get_all_projects 関数の後など)
-
 def get_project_by_id(project_id):
     """指定されたIDの案件情報をデータベースから取得する"""
     conn = create_connection()
@@ -531,9 +509,7 @@ def get_project_by_id(project_id):
     finally:
         if conn:
             conn.close()
-
 # database_operations.py に追記 (get_project_by_id 関数の後など)
-
 def update_project(project_id, project_code, project_name, customer_id, parent_project_id,
                    site_address, reception_date, start_date_scheduled,
                    completion_date_scheduled, actual_completion_date,
@@ -595,7 +571,6 @@ def update_project(project_id, project_code, project_name, customer_id, parent_p
         if conn:
             conn.close()
 # database_operations.py に追記 (update_project 関数の後など)
-
 def delete_project(project_id):
     """指定されたIDの案件情報を削除する"""
     conn = create_connection()
@@ -633,9 +608,7 @@ def delete_project(project_id):
         if conn:
             conn.close()
 # database_operations.py に追記
-
 # --- 見積ヘッダー (Quotations) テーブル操作 ---
-
 def add_quotation(project_id, quotation_staff_id, quotation_code, quotation_date, 
                   customer_name_at_quote, project_name_at_quote, site_address_at_quote,
                   construction_period_notes, total_amount_exclusive_tax, tax_rate, 
@@ -691,9 +664,7 @@ def add_quotation(project_id, quotation_staff_id, quotation_code, quotation_date
         if conn:
             conn.close()
 # database_operations.py に追記 (add_quotation 関数の後など)
-
 # database_operations.py の add_quotation_item 関数を修正
-
 def add_quotation_item(quotation_id, name, specification, 
                        quantity, unit, unit_price, amount, remarks): # display_order を引数から削除
     """新しい見積明細をデータベースに追加する (表示順は自動採番)"""
@@ -778,7 +749,48 @@ def get_items_for_quotation(quotation_id):
             conn.close()
 # (この後、get_all_quotations, get_quotation_by_id, update_quotation, delete_quotation 関数や、
 #  quotation_items テーブル用の関数も追加していきます)
-# database_operations.py に追記 (get_items_for_quotation 関数の後など)
+# database_operations.py に追加 (例: get_items_for_quotation 関数の後など)
+
+def get_quotation_item_by_id(item_id):
+    """指定されたitem_idの明細データを取得し、辞書として返す"""
+    conn = create_connection()
+    if not conn:
+        return None # 接続エラー時は None を返す
+
+    # quotation_items テーブルの全てのカラムを取得する想定
+    # display_order も含みます
+    query = """
+        SELECT 
+            item_id, quotation_id, display_order, name, specification, 
+            quantity, unit, unit_price, amount, remarks, 
+            created_at, updated_at 
+        FROM quotation_items 
+        WHERE item_id = ?;
+    """
+    try:
+        cur = conn.cursor()
+        cur.execute(query, (item_id,))
+        item_data_tuple = cur.fetchone() # 1件のデータをタプルとして取得
+        
+        if item_data_tuple:
+            # カラム名（実際のテーブル定義に合わせてください）
+            columns = [
+                "item_id", "quotation_id", "display_order", "name", 
+                "specification", "quantity", "unit", "unit_price", 
+                "amount", "remarks", "created_at", "updated_at"
+            ]
+            item_data_dict = dict(zip(columns, item_data_tuple))
+            return item_data_dict # 辞書として返す
+        else:
+            print(f"No quotation item found with item_id: {item_id}")
+            return None # データが見つからない場合はNone
+            
+    except sqlite3.Error as e:
+        print(f"Error getting quotation item by id {item_id}: {e}")
+        return None # エラー時はNoneを返す
+    finally:
+        if conn:
+            conn.close()
 
 def get_all_quotations():
     """全ての見積ヘッダー情報をデータベースから取得する"""
