@@ -241,6 +241,9 @@ class QuotationManagementWindow(tk.Toplevel):
             self.start_edit_header_button.config(state="disabled") # 編集開始ボタンは一旦無効化
         if hasattr(self, 'new_quotation_button'):
             self.new_quotation_button.config(state="disabled") # 新規作成ボタンも編集中は無効化 (推奨)
+        if hasattr(self, 'delete_quotation_button'): 
+            self.delete_quotation_button.config(state="disabled") # ★追加: ヘッダー編集中は削除不可
+
         
         # 必要であれば、編集をキャンセルするボタンを有効化する
         # (例: self.cancel_edit_header_button.config(state="normal"))
@@ -302,7 +305,72 @@ class QuotationManagementWindow(tk.Toplevel):
         self.save_quotation_button = ttk.Button(parent_frame, text="見積保存", command=self.save_quotation_data, state=tk.DISABLED)
         self.save_quotation_button.pack(side=tk.LEFT, padx=5, pady=5)
         
-        # TODO: 必要であれば他のグローバルボタン (削除、印刷など) もここに追加
+        # 「見積削除」ボタンを追加
+        self.delete_quotation_button = ttk.Button(parent_frame, text="見積削除", command=self.confirm_delete_quotation, state=tk.DISABLED)
+        self.delete_quotation_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+    def confirm_delete_quotation(self):
+        if self.selected_quotation_id is None:
+            messagebox.showwarning("未選択", "削除する見積ヘッダーが選択されていません。", parent=self)
+            self.lift()
+            return
+
+        # 削除対象の見積情報を取得して確認メッセージに表示（より親切にするため）
+        quotation_code_to_confirm = ""
+        if hasattr(self, 'headers_tree') and self.headers_tree.exists(str(self.selected_quotation_id)):
+            try:
+                item_values = self.headers_tree.item(str(self.selected_quotation_id), 'values')
+                # headers_tree の "quotation_code" は2番目(インデックス1)のカラムと想定
+                # columns = ("quotation_id", "quotation_code", ...)
+                if len(item_values) > 1:
+                    quotation_code_to_confirm = item_values[1]
+            except Exception as e:
+                print(f"Error fetching quotation code from tree for confirmation: {e}")
+
+        confirm_message = f"見積「{quotation_code_to_confirm}」(ID: {self.selected_quotation_id}) を本当に削除しますか？\n関連する全ての明細も削除されます。"
+
+        if not messagebox.askyesno("見積削除確認", confirm_message, parent=self):
+            self.lift()
+            return
+
+        # データベースから見積ヘッダーと関連明細を削除
+        delete_result = self.db_ops.delete_quotation(self.selected_quotation_id)
+
+        if delete_result is True:
+            messagebox.showinfo("削除成功", f"見積 (ID: {self.selected_quotation_id}) を削除しました。", parent=self)
+
+            # 見積ヘッダー一覧を再読み込み
+            self.load_quotation_headers_to_treeview()
+
+            # フォームクリアとボタン状態の更新は load_quotation_headers_to_treeview の後、
+            # on_header_tree_select が選択なしの状態で呼ばれることで行われることを期待。
+            # もし on_header_tree_select が呼ばれない、または不十分な場合は明示的にクリア/状態設定。
+            # 通常、load_quotation_headers_to_treeview で全削除・再挿入すると選択は解除される。
+            # 強制的に選択なしイベントを発生させたい場合は、一度unbindし、selection_clearし、bindし直すなどの方法もあるが、
+            # まずはload後の on_header_tree_select の動作に期待。
+            # 必要であれば、ここで self.prepare_new_quotation() を呼び出すか、
+            # on_header_tree_select(None) のような形で手動トリガーを検討。
+            # 今回は、on_header_tree_select が選択なしで呼ばれることを前提とする。
+            # (もし呼ばれない場合は、load_quotation_headers_to_treeview の最後に self.headers_tree.selection_clear() を追加し、
+            #  さらに on_header_tree_select(None) を呼ぶなど。)
+
+            # 念のため、主要な状態をリセット
+            self.selected_quotation_id = None
+            for key in self.detail_vars: # ヘッダーフォームクリア
+                self.detail_vars[key].set("")
+            if hasattr(self, 'items_tree'): # 明細ツリークリア
+                for item in self.items_tree.get_children():
+                    self.items_tree.delete(item)
+
+            # ボタン類の状態を初期化 (on_header_tree_select で処理される部分と重複する可能性あり)
+            if hasattr(self, 'save_quotation_button'): self.save_quotation_button.config(state=tk.DISABLED)
+            if hasattr(self, 'start_edit_header_button'): self.start_edit_header_button.config(state=tk.DISABLED)
+            if hasattr(self, 'delete_quotation_button'): self.delete_quotation_button.config(state=tk.DISABLED) # 自分自身も無効化
+            if hasattr(self, 'add_item_button'): self.add_item_button.config(state=tk.DISABLED)
+            if hasattr(self, 'edit_item_button'): self.edit_item_button.config(state=tk.DISABLED)
+            if hasattr(self, 'delete_item_button'): self.delete_item_button.config(state=tk.DISABLED)
+
+ # TODO: 必要であれば他のグローバルボタン (印刷など) もここに追加
 
     def prepare_new_quotation(self):
         # ★ もしヘッダー編集中なら、それを解除する
@@ -707,6 +775,9 @@ class QuotationManagementWindow(tk.Toplevel):
                 self.add_item_button.config(state=tk.NORMAL) # 見積ヘッダー選択時は明細追加を可能に
             if hasattr(self, 'start_edit_header_button'): # ★追加
                 self.start_edit_header_button.config(state=tk.NORMAL) # ヘッダー選択時は編集開始ボタンを有効化
+            if hasattr(self, 'delete_quotation_button'): self.delete_quotation_button.config(state=tk.NORMAL) # ★追加: 選択時は有効
+            # edit_item_button, delete_item_button は on_item_tree_select で制御
+
 
             # TODO: 「ヘッダー編集開始」ボタンなどを有効化
             # TODO: 「ヘッダー削除」ボタンなども有効化
@@ -724,6 +795,9 @@ class QuotationManagementWindow(tk.Toplevel):
             if hasattr(self, 'save_quotation_button'): self.save_quotation_button.config(state=tk.DISABLED)
             if hasattr(self, 'add_item_button'): self.add_item_button.config(state=tk.DISABLED)
             if hasattr(self, 'start_edit_header_button'): self.start_edit_header_button.config(state=tk.DISABLED)
+            if hasattr(self, 'delete_quotation_button'): self.delete_quotation_button.config(state=tk.DISABLED) # ★追加
+
+
 
     def _create_items_treeview(self, parent_frame):
         # ### 変更点: 表示カラムの変更 ###
