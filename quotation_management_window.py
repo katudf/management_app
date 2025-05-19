@@ -19,7 +19,7 @@ class QuotationManagementWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._create_widgets() # ウィジェット作成メソッドを呼び出し
-        self.load_quotation_headers_to_treeview() # ヘッダー一覧を読み込む
+        self.load_quotation_headers_to_treeview()
 
     def _create_widgets(self):
         # --- メインフレーム (左右に分割) ---
@@ -49,7 +49,19 @@ class QuotationManagementWindow(tk.Toplevel):
         self._create_item_action_buttons(self.item_action_frame) # 明細操作ボタン作成メソッド呼び出し
         
         self._create_items_treeview(items_list_frame) # Treeview作成メソッド呼び出し
+        # --- スタイル設定 (オプション) ---
+        style = ttk.Style(self) # self を渡して、このウィンドウにスタイルを適用
         
+        # ### Treeviewのフォントと行の高さを調整 ###
+        # お使いの環境で見やすいフォント名とサイズを指定してください。
+        # rowheight はピクセル単位の目安です。フォントサイズと合わせて調整します。
+        tree_font_family = "メイリオ" # または "Yu Gothic UI", "MS Gothic", "Arial" など
+        tree_font_size = 10        # 少し小さめなら9、標準なら10か11
+        tree_row_height = tree_font_size + 10 # フォントサイズ + 適度な余白 (例: 20 や 25)
+
+        style.configure("Treeview", font=(tree_font_family, tree_font_size), rowheight=tree_row_height) 
+        style.configure("Treeview.Heading", font=(tree_font_family, tree_font_size, "bold"))
+        # ### ここまで ###        
         # --- 最下部：操作ボタンフレーム ---
         # このボタンは、ヘッダー一覧に対する操作か、明細に対する操作かで配置を考える
         # まずはヘッダー一覧に対する「新規作成」ボタンなどを配置
@@ -193,18 +205,18 @@ class QuotationManagementWindow(tk.Toplevel):
         # TODO: 将来的には編集用にEntryウィジェットなどと切り替えられるようにする
 
 
-    def _create_items_treeview(self, parent_frame): # parent_frame は items_list_frame
-        # 表示するカラムを定義 (get_items_for_quotation で取得する情報を元に選択)
+    def _create_items_treeview(self, parent_frame):
+        # ### 変更点: 表示カラムの変更 ###
         columns = (
-            "item_id", "display_order", "name", "specification", "quantity", 
+            "no", "name", "specification", "quantity", # item_id, display_order を削除し、no を追加
             "unit", "unit_price", "amount", "remarks"
         )
         self.items_tree = ttk.Treeview(parent_frame, columns=columns, show="headings", height=10)
 
         # 各列のヘッダーテキストと幅などを設定
-        self.items_tree.heading("item_id", text="明細ID"); self.items_tree.column("item_id", width=50, anchor=tk.CENTER)
-        self.items_tree.heading("display_order", text="順"); self.items_tree.column("display_order", width=40, anchor=tk.CENTER)
-        self.items_tree.heading("name", text="名称"); self.items_tree.column("name", width=200)
+        self.items_tree.heading("no", text="No.") # ### 追加 ###
+        self.items_tree.column("no", width=40, anchor=tk.CENTER) # ### 追加 ###
+        self.items_tree.heading("name", text="名称") 
         self.items_tree.heading("specification", text="仕様"); self.items_tree.column("specification", width=200)
         self.items_tree.heading("quantity", text="数量"); self.items_tree.column("quantity", width=60, anchor=tk.E)
         self.items_tree.heading("unit", text="単位"); self.items_tree.column("unit", width=60, anchor=tk.CENTER)
@@ -245,7 +257,7 @@ class QuotationManagementWindow(tk.Toplevel):
 
     def prepare_new_quotation(self):
         # print("### prepare_new_quotation: START") # デバッグ用
-
+        self._preparing_new_quotation_flag = True # ★ フラグを立てる
         if hasattr(self, 'headers_tree'):
             self.headers_tree.unbind("<<TreeviewSelect>>") # ### 変更点: メソッドの最初に移動 ###
             # print("### prepare_new_quotation: Unbound TreeviewSelect")
@@ -273,6 +285,7 @@ class QuotationManagementWindow(tk.Toplevel):
 
         self.detail_vars["quotation_date"].set(datetime.now().strftime("%Y-%m-%d"))
         self.detail_vars["status"].set("作成中")
+        self.detail_vars["tax_rate"].set("10") # ### 追加: 税率のデフォルトを10 (%) として設定 ###
 
         if "project_id" in self.header_form_entries:
              self.header_form_entries["project_id"].config(state="normal")
@@ -354,26 +367,34 @@ class QuotationManagementWindow(tk.Toplevel):
             project_id = int(project_id_str)
             quotation_staff_id = int(quotation_staff_id_str) if quotation_staff_id_str else None
             
-            # 金額・税率の変換 (明細がないので、ここでは入力された値をそのまま使うか、0とする)
-            # 本来、これらの合計金額は明細から計算されるべき。新規ヘッダー保存時は0で良いかも。
+            # 金額関連 (明細がない新規ヘッダーなので、当面は手入力か0)
             total_amount_exclusive_tax = int(total_amount_exclusive_tax_str) if total_amount_exclusive_tax_str else 0
-            tax_rate = float(tax_rate_str) / 100.0 if tax_rate_str else 0.0 # 例: "10" -> 0.1
-            tax_amount = int(tax_amount_str) if tax_amount_str else 0
-            total_amount_inclusive_tax = int(total_amount_inclusive_tax_str) if total_amount_inclusive_tax_str else 0
+            tax_rate_for_db = 0.0 # デフォルト値
+            if tax_rate_str:
+                try:
+                    tax_rate_for_db = float(tax_rate_str) / 100.0 # 例: "10" -> 0.1
+                except ValueError:
+                    messagebox.showerror("入力エラー", "税率には数値を入力してください。"); return
+            
+            # 明細がない新規ヘッダーの場合、税額と税込合計は手入力された値か、税抜と税率から計算
+            # (ここでは、再計算ロジックに任せるか、手入力値を優先するか選べるが、
+            #  recalculate_and_update_quotation_totals で計算されるので、ここでは初期値0でも良い)
+            tax_amount = 0
+            total_amount_inclusive_tax = total_amount_exclusive_tax # 税抜と同額（税0の場合）
 
-            # TODO: 本来は、税抜合計と税率から税額と税込合計を計算するロジックが必要
-            # if total_amount_exclusive_tax is not None and tax_rate is not None:
-            #     calculated_tax = int(total_amount_exclusive_tax * tax_rate)
-            #     calculated_total_inclusive = total_amount_exclusive_tax + calculated_tax
-            #     # フォームに入力された値と一致するか確認、または計算値を優先するなど
-            #     tax_amount = calculated_tax # 計算値を優先する場合
-            #     total_amount_inclusive_tax = calculated_total_inclusive # 計算値を優先する場合
+            # もしフォームに税額や税込合計が手入力されていれば、それを使うことも可能
+            # if tax_amount_str: tax_amount = int(tax_amount_str)
+            # if total_amount_inclusive_tax_str: total_amount_inclusive_tax = int(total_amount_inclusive_tax_str)
+            # else: # 手入力がなければ、計算する
+            if total_amount_exclusive_tax is not None and tax_rate_for_db is not None:
+                 tax_amount = int(total_amount_exclusive_tax * tax_rate_for_db) # 小数点以下切り捨て
+                 total_amount_inclusive_tax = total_amount_exclusive_tax + tax_amount
 
             # データベースに追加
             result = self.db_ops.add_quotation(
                 project_id, quotation_staff_id, quotation_code, quotation_date,
                 customer_name_at_quote, project_name_at_quote, site_address_at_quote,
-                construction_period_notes, total_amount_exclusive_tax, tax_rate,
+                construction_period_notes, total_amount_exclusive_tax, tax_rate_for_db,
                 tax_amount, total_amount_inclusive_tax, validity_period_notes,
                 payment_terms_notes, status, remarks
             )
@@ -446,13 +467,17 @@ class QuotationManagementWindow(tk.Toplevel):
         # else:
             # messagebox.showinfo("情報", "登録されている見積情報はありません。") # 必要に応じて
         
-    # quotation_management_window.py に以下のメソッドを追加
 
 # quotation_management_window.py の QuotationManagementWindow クラス内
 
     def on_header_tree_select(self, event):
         # unbind/bind方式を採用しているため、_is_preparing_new フラグのチェックは不要
-
+        # ★ 新規見積準備中フラグが立っているか確認
+        if getattr(self, '_preparing_new_quotation_flag', False):
+            self._preparing_new_quotation_flag = False # フラグを消費 (リセット)
+            # 新規準備中の副作用でこのイベントが呼ばれた場合は、
+            # フォームのクリアやボタンの無効化は行わない
+            return 
         selected_items = self.headers_tree.selection()
         # print(f"### on_header_tree_select: Selected items: {selected_items}") # デバッグ用
 
@@ -533,25 +558,39 @@ class QuotationManagementWindow(tk.Toplevel):
             # ボタンの状態更新
             if hasattr(self, 'save_quotation_button'): self.save_quotation_button.config(state=tk.DISABLED)
             if hasattr(self, 'add_item_button'): self.add_item_button.config(state=tk.DISABLED)
-    def _create_items_treeview(self, parent_frame): # parent_frame は items_list_frame
-        # 表示するカラムを定義 (get_items_for_quotation で取得する情報を元に選択)
+    def _create_items_treeview(self, parent_frame):
+        # ### 変更点: 表示カラムの変更 ###
         columns = (
-            "item_id", "display_order", "name", "specification", "quantity",
+            "no", "name", "specification", "quantity", # item_id, display_order を削除し、no を追加
             "unit", "unit_price", "amount", "remarks"
         )
         self.items_tree = ttk.Treeview(parent_frame, columns=columns, show="headings", height=10)
 
         # 各列のヘッダーテキストと幅などを設定
-        self.items_tree.heading("item_id", text="明細ID"); self.items_tree.column("item_id", width=50, anchor=tk.CENTER)
-        self.items_tree.heading("display_order", text="順"); self.items_tree.column("display_order", width=40, anchor=tk.CENTER)
-        self.items_tree.heading("name", text="名称"); self.items_tree.column("name", width=200)
-        self.items_tree.heading("specification", text="仕様"); self.items_tree.column("specification", width=200)
-        self.items_tree.heading("quantity", text="数量"); self.items_tree.column("quantity", width=60, anchor=tk.E)
-        self.items_tree.heading("unit", text="単位"); self.items_tree.column("unit", width=60, anchor=tk.CENTER)
-        self.items_tree.heading("unit_price", text="単価"); self.items_tree.column("unit_price", width=90, anchor=tk.E)
-        self.items_tree.heading("amount", text="金額"); self.items_tree.column("amount", width=90, anchor=tk.E)
-        self.items_tree.heading("remarks", text="備考"); self.items_tree.column("remarks", width=150)
+        # self.items_tree.heading("item_id", text="明細ID") # 削除
+        # self.items_tree.column("item_id", width=50, anchor=tk.CENTER) # 削除
 
+        self.items_tree.heading("no", text="No.") # ### 追加 ###
+        self.items_tree.column("no", width=40, anchor=tk.CENTER) # ### 追加 ###
+        
+        # self.items_tree.heading("display_order", text="順") # 削除
+        # self.items_tree.column("display_order", width=40, anchor=tk.CENTER) # 削除
+
+        self.items_tree.heading("name", text="名称")
+        # ... (以降のカラム設定は変更なし、ただしインデックスは変わらないので注意) ...
+        self.items_tree.column("name", width=200)
+        self.items_tree.heading("specification", text="仕様")
+        self.items_tree.column("specification", width=200)
+        self.items_tree.heading("quantity", text="数量")
+        self.items_tree.column("quantity", width=60, anchor=tk.E)
+        self.items_tree.heading("unit", text="単位")
+        self.items_tree.column("unit", width=60, anchor=tk.CENTER)
+        self.items_tree.heading("unit_price", text="単価")
+        self.items_tree.column("unit_price", width=90, anchor=tk.E)
+        self.items_tree.heading("amount", text="金額")
+        self.items_tree.column("amount", width=90, anchor=tk.E)
+        self.items_tree.heading("remarks", text="備考")
+        self.items_tree.column("remarks", width=150)
         # スクロールバーの作成
         scrollbar_y = ttk.Scrollbar(parent_frame, orient=tk.VERTICAL, command=self.items_tree.yview)
         scrollbar_x = ttk.Scrollbar(parent_frame, orient=tk.HORIZONTAL, command=self.items_tree.xview)
@@ -568,44 +607,38 @@ class QuotationManagementWindow(tk.Toplevel):
         # 明細Treeview選択時のイベント設定
         self.items_tree.bind("<<TreeviewSelect>>", self.on_item_tree_select)
 
+# quotation_management_window.py の load_selected_quotation_items メソッドを修正
     def load_selected_quotation_items(self, quotation_id):
-        """指定された見積IDの明細をitems_treeに読み込む"""
-        # Treeviewの既存のアイテムをすべて削除
         for item in self.items_tree.get_children():
             self.items_tree.delete(item)
 
-        if quotation_id is None: # 読み込むべき見積がない場合は何もしない
+        if quotation_id is None:
             return
 
-        items_data = self.db_ops.get_items_for_quotation(quotation_id)
+        items_data = self.db_ops.get_items_for_quotation(quotation_id) # DBからは display_order も取得されるが使わない
         
         if items_data:
-            for item_tuple in items_data:
+            for index, item_tuple in enumerate(items_data): # ### enumerate でインデックスを取得 ###
                 # get_items_for_quotation が返すタプルのインデックス:
                 # (0:item_id, 1:quotation_id, 2:display_order, 3:name, 4:specification, 
                 #  5:quantity, 6:unit, 7:unit_price, 8:amount, 9:remarks, ...)
 
-                # Treeviewに表示する値を選択して整形
-                # columns = ("item_id", "display_order", "name", "specification", "quantity", 
-                #            "unit", "unit_price", "amount", "remarks")
-                
-                quantity_display = f"{item_tuple[5]:.2f}" if item_tuple[5] is not None else "" # 小数点2桁表示
+                quantity_display = f"{item_tuple[5]:.2f}" if item_tuple[5] is not None else ""
                 unit_price_display = f"{item_tuple[7]:,}" if item_tuple[7] is not None else ""
                 amount_display = f"{item_tuple[8]:,}" if item_tuple[8] is not None else ""
 
-
                 display_values = (
-                    item_tuple[0],  # item_id
-                    item_tuple[2] or "",  # display_order
-                    item_tuple[3],  # name
+                    index + 1,            # ### No. (1から始まる連番) ###
+                    item_tuple[3],        # name
                     item_tuple[4] or "",  # specification
-                    quantity_display,  # quantity
+                    quantity_display,     # quantity
                     item_tuple[6] or "",  # unit
-                    unit_price_display,  # unit_price
-                    amount_display,  # amount
+                    unit_price_display,   # unit_price
+                    amount_display,       # amount
                     item_tuple[9] or ""   # remarks
                 )
-                self.items_tree.insert("", tk.END, values=display_values, iid=item_tuple[0])
+                # iid は item_id (DBの主キー) を使うことで、後で選択行の特定に利用
+                self.items_tree.insert("", tk.END, values=display_values, iid=item_tuple[0]) 
     def on_item_tree_select(self, event):
         # 現時点では具体的な処理は未実装でも、メソッドが存在することが重要
         # ここで選択された明細アイテムを取得し、
@@ -638,7 +671,6 @@ class QuotationManagementWindow(tk.Toplevel):
             # データベースに新しい明細を追加
             new_item_id_or_error = self.db_ops.add_quotation_item(
                 quotation_id=item_data["quotation_id"], # dialogから渡されたquotation_id
-                display_order=item_data["display_order"],
                 name=item_data["name"],
                 specification=item_data["specification"],
                 quantity=item_data["quantity"],
@@ -651,11 +683,92 @@ class QuotationManagementWindow(tk.Toplevel):
             if isinstance(new_item_id_or_error, int):
                 messagebox.showinfo("成功", "見積明細を追加しました。", parent=self)
                 self.load_selected_quotation_items(self.selected_quotation_id) # 明細一覧を更新
-                # TODO: ここで見積ヘッダーの合計金額を再計算し、表示とDBを更新する処理を呼び出す
-                # self.recalculate_and_update_quotation_totals(self.selected_quotation_id)
+                self.recalculate_and_update_quotation_totals(self.selected_quotation_id) # ### この行のメソッド名を確認 ###
             else:
                 messagebox.showerror("エラー", f"明細の追加に失敗しました: {new_item_id_or_error}", parent=self)
         self.lift()
+        # quotation_management_window.py の QuotationManagementWindow クラス内
+# quotation_management_window.py の recalculate_and_update_quotation_totals メソッドを修正
+
+# quotation_management_window.py の QuotationManagementWindow クラス内
+
+    def recalculate_and_update_quotation_totals(self, quotation_id):
+        print(f"### DEBUG: recalculate_totals CALLED for quotation_id: {quotation_id}")
+        if quotation_id is None:
+            # フォームの合計金額関連をクリアまたはデフォルト（例: 0）に設定
+            self.detail_vars["total_amount_exclusive_tax"].set("0")
+            self.detail_vars["tax_amount"].set("0")
+            self.detail_vars["total_amount_inclusive_tax"].set("0")
+            self.detail_vars["tax_rate"].set("0%") # または ""
+            print("### DEBUG: quotation_id is None, totals cleared on form.")
+            return
+
+        items = self.db_ops.get_items_for_quotation(quotation_id)
+        print(f"### DEBUG: Fetched items for total calculation: {items}")
+        
+        total_exclusive = 0
+        if items:
+            for item_tuple in items:
+                # amount はインデックス 8 
+                # (item_id, q_id, disp_order, name, spec, qty, unit, unit_price, amount, rem, cr_at, up_at)
+                item_amount = item_tuple[8] if item_tuple[8] is not None else 0
+                total_exclusive += item_amount
+                print(f"### DEBUG: item_amount: {item_amount}, current total_exclusive: {total_exclusive}")
+        
+        print(f"### DEBUG: Final total_exclusive calculated: {total_exclusive}")
+        
+        # DBから最新の見積ヘッダー情報を取得して、そこから税率を使用
+        current_header_data_for_tax_info = self.db_ops.get_quotation_by_id(quotation_id)
+        if not current_header_data_for_tax_info:
+            messagebox.showerror("エラー", "合計計算のための見積ヘッダー情報取得に失敗しました。", parent=self)
+            return
+
+        # get_quotation_by_id が返すタプルのインデックス (再確認):
+        # (..., 12:q.tax_rate, ...)
+        db_tax_rate_value = current_header_data_for_tax_info[12] if current_header_data_for_tax_info[12] is not None else 0.0
+        
+        current_tax_rate_for_calc = db_tax_rate_value # DBの税率で計算
+
+        tax_amount = int(total_exclusive * current_tax_rate_for_calc) # ### 消費税の小数点以下は切り捨て ###
+        total_inclusive = total_exclusive + tax_amount
+        print(f"### DEBUG: tax_rate: {current_tax_rate_for_calc}, tax_amount: {tax_amount}, total_inclusive: {total_inclusive}")
+
+        # フォームのStringVarを更新
+        self.detail_vars["total_amount_exclusive_tax"].set(f"{total_exclusive:,}")
+        self.detail_vars["tax_rate"].set(f"{current_tax_rate_for_calc*100:.0f}%") # DBの税率を再表示
+        self.detail_vars["tax_amount"].set(f"{tax_amount:,}")
+        self.detail_vars["total_amount_inclusive_tax"].set(f"{total_inclusive:,}")
+        print("### DEBUG: Form totals updated.")
+
+        # データベースのquotationsテーブルも更新
+        # current_header_data_for_tax_info を使って他のフィールドも埋める
+        if current_header_data_for_tax_info: # 変数名を修正
+            update_result = self.db_ops.update_quotation(
+                quotation_id=quotation_id,
+                project_id=current_header_data_for_tax_info[1],
+                quotation_staff_id=current_header_data_for_tax_info[3],
+                quotation_code=current_header_data_for_tax_info[5],
+                quotation_date=current_header_data_for_tax_info[6],
+                customer_name_at_quote=current_header_data_for_tax_info[7],
+                project_name_at_quote=current_header_data_for_tax_info[8],
+                site_address_at_quote=current_header_data_for_tax_info[9],
+                construction_period_notes=current_header_data_for_tax_info[10],
+                total_amount_exclusive_tax=total_exclusive,       # 更新
+                tax_rate=current_tax_rate_for_calc,               # 更新
+                tax_amount=tax_amount,                            # 更新
+                total_amount_inclusive_tax=total_inclusive,       # 更新
+                validity_period_notes=current_header_data_for_tax_info[15],
+                payment_terms_notes=current_header_data_for_tax_info[16],
+                status=current_header_data_for_tax_info[17], 
+                remarks=current_header_data_for_tax_info[18]
+            )
+            if update_result is True:
+                print(f"### DEBUG: Quotation ID {quotation_id} totals updated in DB.")
+                self.load_quotation_headers_to_treeview() 
+            else:
+                messagebox.showerror("エラー", f"見積合計金額のDB更新に失敗しました: {update_result}", parent=self)
+                print(f"### DEBUG: DB update failed for totals: {update_result}")
+        # else は上で処理済み(current_header_data_for_tax_info がなければreturnしているため)
     def open_edit_item_dialog(self):
         # (選択された明細のデータをダイアログに渡して開く処理 - 後で実装)
         messagebox.showinfo("未実装", "明細編集ダイアログは未実装です。", parent=self)
@@ -679,6 +792,7 @@ class QuotationItemDialog(tk.Toplevel):
         self.result = None   
         self.item_data = item_data 
         self.quotation_id = quotation_id 
+        self._preparing_new_quotation_flag = False # 新規見積準備中フラグを追加
 
         self.resizable(False, False)
 
@@ -689,13 +803,13 @@ class QuotationItemDialog(tk.Toplevel):
         # --- 入力フィールド定義 ---
         # (表示順, 名称, 仕様, 数量, 単位, 単価, 備考)
         fields = {
-            "display_order": {"label": "表示順:", "row": 0, "col": 0, "width": 10, "type": "entry"},
-            "name": {"label": "名称 (必須):", "row": 1, "col": 0, "width": 40, "type": "entry"},
-            "specification": {"label": "仕様:", "row": 2, "col": 0, "width": 40, "type": "text", "height": 3}, # Textウィジェット
-            "quantity": {"label": "数量:", "row": 3, "col": 0, "width": 10, "type": "entry"},
-            "unit": {"label": "単位:", "row": 3, "col": 2, "width": 10, "type": "entry"},
-            "unit_price": {"label": "単価:", "row": 4, "col": 0, "width": 15, "type": "entry"},
-            "remarks": {"label": "備考:", "row": 5, "col": 0, "width": 40, "type": "text", "height": 3} # Textウィジェット
+            # "display_order": {"label": "表示順:", "row": 0, "col": 0, "width": 10, "type": "entry"}, # ### 削除 ###
+            "name": {"label": "名称 (必須):", "row": 0, "col": 0, "width": 40, "type": "entry"}, # rowを0に変更
+            "specification": {"label": "仕様:", "row": 1, "col": 0, "width": 40, "type": "text", "height": 3}, # rowを1に変更
+            "quantity": {"label": "数量:", "row": 2, "col": 0, "width": 10, "type": "entry"}, # rowを2に変更
+            "unit": {"label": "単位:", "row": 2, "col": 2, "width": 10, "type": "entry"}, # rowを2に変更
+            "unit_price": {"label": "単価:", "row": 3, "col": 0, "width": 15, "type": "entry"}, # rowを3に変更
+            "remarks": {"label": "備考:", "row": 4, "col": 0, "width": 40, "type": "text", "height": 3} # rowを4に変更
         }
 
         self.entries = {} # 入力ウィジェットを保持する辞書
@@ -764,9 +878,6 @@ class QuotationItemDialog(tk.Toplevel):
             return
 
         try:
-            display_order_str = self.string_vars["display_order"].get().strip()
-            display_order = int(display_order_str) if display_order_str else None
-
             quantity_str = self.string_vars["quantity"].get().strip()
             quantity = float(quantity_str) if quantity_str else 0.0
 
@@ -781,7 +892,6 @@ class QuotationItemDialog(tk.Toplevel):
 
         self.result = {
             "quotation_id": self.quotation_id,
-            "display_order": display_order,
             "name": name,
             "specification": self.entries["specification"].get("1.0", tk.END).strip(),
             "quantity": quantity,
@@ -798,92 +908,6 @@ class QuotationItemDialog(tk.Toplevel):
 
     def on_cancel(self):
         self.destroy()
-
-    # --- QuotationManagementWindow クラスのメソッドに戻る ---
-    # _create_item_action_buttons で定義したコマンドに対応するメソッドの枠組みを追加
-
-    # quotation_management_window.py の QuotationManagementWindow クラス内
-    # quotation_management_window.py の QuotationManagementWindow クラス内にメソッド追加
-    def recalculate_and_update_quotation_totals(self, quotation_id):
-        if quotation_id is None:
-            return
-
-        items = self.db_ops.get_items_for_quotation(quotation_id)
-        
-        total_exclusive = 0
-        if items:
-            for item_tuple in items:
-                # amount はインデックス 8 (item_id, q_id, disp, name, spec, qty, unit, unit_price, amount, rem, ca, ua)
-                total_exclusive += item_tuple[8] if item_tuple[8] is not None else 0
-        
-        # 税率を取得 (ヘッダーフォームまたはDBから)
-        tax_rate_str = self.detail_vars["tax_rate"].get().replace('%', '')
-        try:
-            tax_rate = float(tax_rate_str) / 100.0 if tax_rate_str else 0.0
-        except ValueError:
-            tax_rate = 0.0 # エラーの場合は0%としておく
-
-        tax_amount = int(total_exclusive * tax_rate) # ここも丸め方に注意が必要
-        total_inclusive = total_exclusive + tax_amount
-
-        # フォームのStringVarを更新
-        self.detail_vars["total_amount_exclusive_tax"].set(f"{total_exclusive:,}")
-        self.detail_vars["tax_amount"].set(f"{tax_amount:,}")
-        self.detail_vars["total_amount_inclusive_tax"].set(f"{total_inclusive:,}")
-
-        # データベースのquotationsテーブルも更新
-        # (現在のヘッダー情報を取得し、金額関連だけ更新してupdate_quotationを呼ぶ)
-        current_header_data = self.db_ops.get_quotation_by_id(quotation_id)
-        if current_header_data:
-            # get_quotation_by_id が返すタプルのインデックスを元に引数を構成
-            # (0:id, 1:proj_id, 2:proj_code, 3:staff_id, 4:staff_name, 5:q_code, 6:q_date, 
-            #  7:cust_name, 8:proj_name_q, 9:site_addr, 10:const_period, 
-            #  11:total_ex, 12:tax_rate_db, 13:tax_am, 14:total_in, 
-            #  15:valid_period, 16:pay_terms, 17:status, 18:remarks)
-            
-            # quotation_staff_id は header_data[3]
-            # tax_rate は header_data[12] (DBの値を使う)
-            
-            update_result = self.db_ops.update_quotation(
-                quotation_id=quotation_id,
-                project_id=current_header_data[1],
-                quotation_staff_id=current_header_data[3],
-                quotation_code=current_header_data[5],
-                quotation_date=current_header_data[6],
-                customer_name_at_quote=current_header_data[7],
-                project_name_at_quote=current_header_data[8],
-                site_address_at_quote=current_header_data[9],
-                construction_period_notes=current_header_data[10],
-                total_amount_exclusive_tax=total_exclusive, # 更新
-                tax_rate=current_header_data[12], # DBの税率をそのまま使う
-                tax_amount=tax_amount, # 更新
-                total_amount_inclusive_tax=total_inclusive, # 更新
-                validity_period_notes=current_header_data[15],
-                payment_terms_notes=current_header_data[16],
-                status=current_header_data[17],
-                remarks=current_header_data[18]
-            )
-            if update_result is True:
-                print(f"Quotation ID {quotation_id} totals updated in DB.")
-                # ヘッダー一覧の表示も更新する必要がある
-                self.load_quotation_headers_to_treeview()
-            else:
-                messagebox.showerror("エラー", f"見積合計金額のDB更新に失敗しました: {update_result}", parent=self)
-        else:
-            messagebox.showerror("エラー", "合計金額更新のための現在の見積ヘッダー情報取得に失敗しました。", parent=self)
-
-
-    # open_add_item_dialog メソッドの最後に上記メソッドの呼び出しを追加
-    # if isinstance(new_item_id_or_error, int):
-    #     ...
-    #     self.load_selected_quotation_items(self.selected_quotation_id)
-        self.recalculate_and_update_quotation_totals(self.selected_quotation_id) # ### 追加 ###
-    # else:
-    #     ...
-
-
-        
-
 
 # このファイル単体でテスト実行するためのコード
 if __name__ == '__main__':

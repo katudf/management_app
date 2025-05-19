@@ -692,37 +692,47 @@ def add_quotation(project_id, quotation_staff_id, quotation_code, quotation_date
             conn.close()
 # database_operations.py に追記 (add_quotation 関数の後など)
 
-def add_quotation_item(quotation_id, display_order, name, specification, 
-                       quantity, unit, unit_price, amount, remarks):
-    """新しい見積明細をデータベースに追加する"""
+# database_operations.py の add_quotation_item 関数を修正
+
+def add_quotation_item(quotation_id, name, specification, 
+                       quantity, unit, unit_price, amount, remarks): # display_order を引数から削除
+    """新しい見積明細をデータベースに追加する (表示順は自動採番)"""
     conn = create_connection()
     if not conn:
         return "CONNECTION_ERROR"
 
-    sql = """
-        INSERT INTO quotation_items (
-            quotation_id, display_order, name, specification, quantity, 
-            unit, unit_price, amount, remarks, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """ # 11個のプレースホルダ
-    
-    current_time = get_current_timestamp()
     try:
         cur = conn.cursor()
+
+        # --- 表示順 (display_order) の自動採番ロジック ---
+        cur.execute("SELECT MAX(display_order) FROM quotation_items WHERE quotation_id = ?", (quotation_id,))
+        max_order = cur.fetchone()[0]
+        current_display_order = (max_order if max_order is not None else 0) + 10 # 10刻みで採番 (または +1 でも可)
+        # --- ここまで ---
+
+        sql = """
+            INSERT INTO quotation_items (
+                quotation_id, display_order, name, specification, quantity, 
+                unit, unit_price, amount, remarks, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+        """ 
+        
+        current_time = get_current_timestamp()
         cur.execute(sql, (
-            quotation_id, display_order, name, specification, quantity, 
+            quotation_id, current_display_order, name, specification, quantity, # current_display_order を使用
             unit, unit_price, amount, remarks, current_time, current_time
         ))
         conn.commit()
         new_item_id = cur.lastrowid
-        print(f"Quotation item '{name}' for quotation_id {quotation_id} added successfully with item_id: {new_item_id}")
-        return new_item_id # 追加された明細のIDを返す
+        print(f"Quotation item '{name}' for quotation_id {quotation_id} added successfully with item_id: {new_item_id}, display_order: {current_display_order}")
+        return new_item_id
     except sqlite3.IntegrityError as e:
+        # ... (エラー処理は変更なし) ...
         error_message_lower = str(e).lower()
         if "not null constraint failed" in error_message_lower:
              print(f"Error adding quotation item: A required field (like name or quotation_id) was not provided. Details: {e}")
              return "NOT_NULL_VIOLATION"
-        elif "foreign key constraint failed" in error_message_lower: # quotation_id が quotations テーブルに存在しない場合
+        elif "foreign key constraint failed" in error_message_lower: 
             print(f"Error adding quotation item: Foreign key constraint failed (quotation_id {quotation_id} does not exist). Details: {e}")
             return "FK_CONSTRAINT_FAILED"
         else:
@@ -734,7 +744,6 @@ def add_quotation_item(quotation_id, display_order, name, specification,
     finally:
         if conn:
             conn.close()
-# database_operations.py に追記 (add_quotation_item 関数の後など)
 
 def get_items_for_quotation(quotation_id):
     """指定された見積IDに紐づく全ての明細情報を取得する"""
