@@ -3,8 +3,8 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
-import database_operations as db_ops # データベース操作関数をインポート
-from datetime import datetime # ### この行を追加してください ###
+import database_operations as db_ops
+from datetime import datetime
 
 class QuotationListWindow(tk.Toplevel):
     def __init__(self, master):
