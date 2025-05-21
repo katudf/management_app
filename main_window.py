@@ -3,6 +3,8 @@ from tkinter import ttk # themed Tkinter widgets for a more modern look
 from tkinter import messagebox # ★★★ この行を追加 ★★★
 # ★★★ QuotationListWindow と db_ops をインポート ★★★
 from quotation_management_window import QuotationListWindow 
+# ★★★ ProjectManagementWindow をインポート ★★★
+from project_management_window import ProjectManagementWindow 
 import database_operations as db_ops # データベース操作モジュールをインポート
 
 class Application(tk.Tk):
@@ -50,7 +52,7 @@ class Application(tk.Tk):
         quote_button = ttk.Button(button_frame, text="見積管理", command=self.open_quotation_list_window, **button_style) # ★コマンド変更
         quote_button.pack(pady=5)
 
-        construction_button = ttk.Button(button_frame, text="工事管理", command=self.open_construction_management, **button_style)
+        construction_button = ttk.Button(button_frame, text="工事管理", command=self.open_project_management_window, **button_style) # ★コマンド変更
         construction_button.pack(pady=5)
 
         material_button = ttk.Button(button_frame, text="資材管理", command=self.open_material_management, **button_style)
@@ -83,14 +85,27 @@ class Application(tk.Tk):
         quotation_list_win = QuotationListWindow(self)
         # quotation_list_win.grab_set() # 必要に応じてモーダルにする（今回は不要かもしれません）
 
+    # ★★★ open_project_management_window メソッドを実装 ★★★
+    def open_project_management_window(self):
+        if not hasattr(self, 'db_ops'): # db_ops の存在確認
+             messagebox.showerror("エラー", "データベース操作モジュールが初期化されていません。", parent=self) # parent を指定
+             return
+        
+        project_win = ProjectManagementWindow(self) # ProjectManagementWindow を開く
+        # project_win.grab_set() # 必要に応じてモーダルにする
+
     def open_construction_management(self):
-        print("工事管理画面を開きます (未実装)") #
+        print("工事管理画面を開きます (open_project_management_windowを呼び出します)") 
+        # messagebox.showinfo("未実装", "工事管理機能は現在開発中です。") # または
+        self.open_project_management_window() # ★新しいメソッドを呼び出すように変更してもOK
 
     def open_material_management(self):
         print("資材管理画面を開きます (未実装)") #
+        messagebox.showinfo("未実装", "資材管理機能は現在開発中です。")
 
     def open_personnel_management(self):
         print("人員管理画面を開きます (未実装)") #
+        messagebox.showinfo("未実装", "人員管理機能は現在開発中です。")
 
 if __name__ == "__main__":
     app = Application()

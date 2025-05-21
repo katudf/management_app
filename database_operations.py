@@ -607,6 +607,52 @@ def delete_project(project_id):
     finally:
         if conn:
             conn.close()
+
+# database_operations.py に追加
+
+def get_next_project_code_sequence_for_month(year_month_str):
+    """
+    指定された年月 (YYYYMM形式) における次の案件コードの連番を取得する。
+    案件コードの形式を「P-YYYYMM-NNN」と想定する。
+    """
+    conn = create_connection()
+    if not conn:
+        # 接続エラーの場合、採番できないのでエラーを示すか、Noneを返す
+        # ここでは仮にNoneを返す (呼び出し側でエラー処理が必要)
+        print("DB Connection Error: Could not get next project code sequence.")
+        return None 
+
+    prefix_to_search = f"P-{year_month_str}-" # 例: "P-202505-"
+    next_seq = 1 # デフォルトの次の連番
+
+    try:
+        cur = conn.cursor()
+        # 同じプレフィックスで始まる案件コードの枝番部分の最大値を取得
+        # project_code からプレフィックスを除いた部分を数値としてキャストして比較
+        # SQLiteでは SUBSTR や LENGTH を使うか、REPLACE を使うかなどいくつかの方法がある
+        # ここでは、プレフィックスの長さが固定であることを利用
+        prefix_len = len(prefix_to_search)
+        query = f"""
+            SELECT MAX(CAST(SUBSTR(project_code, {prefix_len + 1}) AS INTEGER)) 
+            FROM projects 
+            WHERE project_code LIKE ?;
+        """
+        # LIKE句のパラメータは % を含める必要がある
+        cur.execute(query, (f"{prefix_to_search}%",))
+        max_seq_row = cur.fetchone()
+        
+        if max_seq_row and max_seq_row[0] is not None:
+            next_seq = max_seq_row[0] + 1
+        
+    except sqlite3.Error as e:
+        print(f"Error getting next project code sequence for {year_month_str}: {e}")
+        # エラーが発生した場合も、採番できないのでエラーを示すか、Noneを返す
+        next_seq = None # または raise e などでエラーを上位に伝播させる
+    finally:
+        if conn:
+            conn.close()
+            
+    return next_seq
 # database_operations.py に追記
 # --- 見積ヘッダー (Quotations) テーブル操作 ---
 def add_quotation(project_id, quotation_staff_id, quotation_code, quotation_date, 
@@ -2020,13 +2066,3 @@ if __name__ == '__main__':
     print("\nAttempting to delete non-existent item ID 888...")
     delete_non_existent_item_result = delete_quotation_item(888) # 存在しないであろうID
     print(f"Result of deleting non-existent item: {delete_non_existent_item_result}") # "NOT_FOUND" になるはず
-
-
-
-
-
-
-
-
-
-
