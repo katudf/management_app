@@ -3,10 +3,12 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
-import database_operations as db_ops # データベース操作関数をインポート
 from datetime import datetime
+import database_operations as db_ops # データベース操作関数をインポート
+# from datetime import datetime # 重複しているので削除
 # QuotationListWindow をインポート (quotation_management_window.py から)
-from quotation_management_window import QuotationListWindow 
+from tkcalendar import DateEntry # ★★★ tkcalendarのDateEntryをインポート ★★★
+from quotation_management_window import QuotationListWindow
 
 class ProjectManagementWindow(tk.Toplevel):
     def __init__(self, master):
@@ -20,22 +22,22 @@ class ProjectManagementWindow(tk.Toplevel):
             messagebox.showerror("エラー", "データベース操作モジュールが見つかりません。", parent=self)
             self.destroy()
             return
-        
+
         self.parent_window = master
         self.selected_project_id = None
         self._is_editing_project = False # ★ 案件編集中フラグを追加
 
         # --- フォームフィールドに対応するTkinter変数を定義 ---
-        self.project_id_var = tk.StringVar() 
+        self.project_id_var = tk.StringVar()
         self.project_code_var = tk.StringVar()
         self.project_name_var = tk.StringVar()
-        
-        self.customer_id_var = tk.StringVar() 
-        self.customer_display_var = tk.StringVar() 
-        
-        self.parent_project_id_var = tk.StringVar() 
-        self.parent_project_display_var = tk.StringVar() 
-        
+
+        self.customer_id_var = tk.StringVar()
+        self.customer_display_var = tk.StringVar()
+
+        self.parent_project_id_var = tk.StringVar()
+        self.parent_project_display_var = tk.StringVar()
+
         self.site_address_var = tk.StringVar()
         self.reception_date_var = tk.StringVar()
         self.start_date_scheduled_var = tk.StringVar()
@@ -43,7 +45,7 @@ class ProjectManagementWindow(tk.Toplevel):
         self.actual_completion_date_var = tk.StringVar()
         self.responsible_staff_var = tk.StringVar()
         self.estimated_amount_var = tk.StringVar()
-        self.status_var = tk.StringVar() 
+        self.status_var = tk.StringVar()
         # self.remarks_text は Text ウィジェットなので StringVar は不要
 
         # Comboboxの選択肢とIDを保持する辞書
@@ -58,7 +60,7 @@ class ProjectManagementWindow(tk.Toplevel):
         self.load_customers_to_combobox()
         self.load_parent_projects_to_combobox()
         self.load_projects_to_treeview()
-        self.clear_form(for_new_project=True) 
+        self.clear_form(for_new_project=True)
 
     def _create_widgets(self):
         main_frame = ttk.Frame(self, padding="10")
@@ -84,7 +86,7 @@ class ProjectManagementWindow(tk.Toplevel):
             ("顧客 (必須):", self.customer_display_var, "customer_id_combobox", "Combobox", {"state": "readonly", "width": 38}, (2,0)),
             ("親案件:", self.parent_project_display_var, "parent_project_id_combobox", "Combobox", {"state": "readonly", "width": 38}, (2,2)),
             ("現場住所:", self.site_address_var, "site_address_entry", "Entry", {"width": 40}, (3,0), 3), # columnspan 3
-            ("受付日:", self.reception_date_var, "reception_date_entry", "Entry", {"width": 20}, (4,0)), # TODO: DateEntry
+            ("受付日:", self.reception_date_var, "reception_date_entry", "CustomDate", {"entry_width": 18}, (4,0)), # ★★★ EntryからCustomDateに変更 ★★★
             ("担当者名:", self.responsible_staff_var, "responsible_staff_entry", "Entry", {"width": 20}, (4,2)),
             ("見積金額(税抜):", self.estimated_amount_var, "estimated_amount_entry", "Entry", {"width": 20}, (5,0)),
             ("状況 (必須):", self.status_var, "status_combobox", "Combobox", {"state": "readonly", "width": 18, "values": self.status_options}, (5,2)),
@@ -99,28 +101,64 @@ class ProjectManagementWindow(tk.Toplevel):
         for label_text, var_instance, widget_attr_name, widget_type, widget_options, grid_pos, *span_info in fields_layout:
             r, c = grid_pos
             ttk.Label(form_frame, text=label_text).grid(row=r, column=c, padx=5, pady=3, sticky=tk.W)
-            
             widget = None
             if widget_type == "Entry":
                 widget = ttk.Entry(form_frame, textvariable=var_instance, **widget_options)
             elif widget_type == "Combobox":
-                # textvariable は options で指定済み
-                widget = ttk.Combobox(form_frame, **widget_options)
+                # Comboboxの場合、textvariableは直接指定せず、Comboboxのインスタンスに .set() や .get() でアクセスする
+                # または、textvariableにvar_instanceを渡す場合は、Combobox側でそれを処理する
+                # ここでは、customer_display_var や parent_project_display_var が Combobox の表示に使われる想定
+                if var_instance: # var_instance がNoneでない場合のみtextvariableを設定
+                    widget = ttk.Combobox(form_frame, textvariable=var_instance, **widget_options)
+                else:
+                    widget = ttk.Combobox(form_frame, **widget_options)
+
             elif widget_type == "Text":
                 widget = tk.Text(form_frame, **widget_options)
-            
+            elif widget_type == "DateEntry": # tkcalendarのDateEntry
+                # DateEntryはtextvariableをサポートしていない。代わりにget_date() / set_date() を使うか、
+                # date_patternを指定して文字列として扱う。
+                # ここでは、StringVarを直接渡さず、後で値の取得・設定を行う形にするか、
+                # または、DateEntry自体がStringVarのように振る舞うようにラップする必要がある。
+                # 簡単な対応として、DateEntryにはtextvariableを直接渡さないでおく。
+                # 値の設定は .set_date() 、取得は .get_date() を使う。
+                # もしStringVarと連携させたい場合は、StringVarのtraceを利用するなどの工夫が必要。
+                # 今回は、CustomDateというタイプを用意して、そちらでStringVarと連携させる。
+                widget_options_copy = widget_options.copy()
+                # DateEntryにtextvariableを渡すとエラーになることがあるので、
+                # widget_options_copyからtextvariableのキーを削除するか、
+                # DateEntryがtextvariableを適切に処理できるか確認が必要。
+                # 一旦、そのまま渡してみる。
+                widget = DateEntry(form_frame, textvariable=var_instance, **widget_options_copy)
+
+
+            elif widget_type == "CustomDate":
+                custom_frame = ttk.Frame(form_frame)
+                entry_width = widget_options.get("entry_width", 12)
+                date_display_entry = ttk.Entry(custom_frame, textvariable=var_instance, width=entry_width, state="readonly")
+                date_display_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                # Assign button and command based on the field
+                if widget_attr_name == "reception_date_entry":
+                    self.reception_date_select_button = ttk.Button(custom_frame, text="日付選択", command=self._open_reception_date_dialog)
+                    self.reception_date_select_button.pack(side=tk.LEFT, padx=(5,0))
+                # Add elif for other CustomDate fields here if they are added in the future
+                widget = custom_frame
+
             if widget:
                 columnspan = span_info[0] if span_info else 1
                 widget.grid(row=r, column=c+1, padx=5, pady=3, sticky=tk.EW, columnspan=columnspan)
-                setattr(self, widget_attr_name, widget) # self.project_code_entry などとしてアクセス可能に
-                # form_entries にはキーとして widget_attr_name (またはvar_instanceの元になった名前) を使う
-                self.form_entries[widget_attr_name.replace("_entry","").replace("_combobox","").replace("_text","")] = widget
+                setattr(self, widget_attr_name, widget)
+                # form_entriesには、StringVarと関連付けないウィジェットもそのまま格納する
+                self.form_entries[widget_attr_name.replace("_entry",""
+                ).replace("_combobox",""
+                ).replace("_text","")] = widget
 
 
         form_frame.columnconfigure(1, weight=1)
         form_frame.columnconfigure(3, weight=1)
         if hasattr(self, 'status_combobox') and self.status_options: # 初期値を設定
-            self.status_combobox.set(self.status_options[0])
+            self.status_combobox.set(self.status_options[0]) # status_combobox は直接 .set() を使う
 
 
         button_action_frame = ttk.Frame(main_frame)
@@ -137,7 +175,7 @@ class ProjectManagementWindow(tk.Toplevel):
         self.clear_button = ttk.Button(button_action_frame, text="クリア/新規", command=lambda: self.clear_form(for_new_project=True))
         self.clear_button.pack(side=tk.LEFT, padx=5)
         self.open_quotations_for_project_button = ttk.Button(
-            button_action_frame, text="この案件の見積管理", 
+            button_action_frame, text="この案件の見積管理",
             command=self.open_quotations_for_selected_project, state=tk.DISABLED
         )
         self.open_quotations_for_project_button.pack(side=tk.LEFT, padx=10)
@@ -150,7 +188,7 @@ class ProjectManagementWindow(tk.Toplevel):
     def _create_project_treeview(self, parent_frame):
         columns = ("project_id", "project_code", "project_name", "customer_name", "status", "reception_date", "responsible_staff_name")
         self.project_tree = ttk.Treeview(parent_frame, columns=columns, show="headings", height=10, style="Treeview")
-        
+
         self.project_tree.heading("project_id", text="ID"); self.project_tree.column("project_id", width=40, anchor=tk.CENTER)
         self.project_tree.heading("project_code", text="案件CD"); self.project_tree.column("project_code", width=100)
         self.project_tree.heading("project_name", text="案件名"); self.project_tree.column("project_name", width=250)
@@ -170,7 +208,7 @@ class ProjectManagementWindow(tk.Toplevel):
 
         parent_frame.grid_rowconfigure(0, weight=1)
         parent_frame.grid_columnconfigure(0, weight=1)
-        
+
         self.project_tree.bind("<<TreeviewSelect>>", self.on_project_tree_select)
         self.project_tree.bind("<Double-1>", self.on_project_double_click)
 
@@ -179,7 +217,7 @@ class ProjectManagementWindow(tk.Toplevel):
         if hasattr(self, 'project_tree'):
             for item in self.project_tree.get_children():
                 self.project_tree.delete(item)
-        
+
         projects_data = self.db_ops.get_all_projects()
         if projects_data:
             for project_tuple in projects_data:
@@ -264,7 +302,7 @@ class ProjectManagementWindow(tk.Toplevel):
             # ボタン状態は後続の処理で設定される
         selected_items = self.project_tree.selection()
         if not selected_items:
-            self.clear_form(for_new_project=False) 
+            self.clear_form(for_new_project=False)
             if hasattr(self, 'project_code_entry'): self.project_code_entry.config(state="normal")
             self.selected_project_id = None
             if hasattr(self, 'update_button'): self.update_button.config(state=tk.DISABLED)
@@ -276,7 +314,7 @@ class ProjectManagementWindow(tk.Toplevel):
             return
 
         selected_iid = selected_items[0]
-        self.selected_project_id = selected_iid 
+        self.selected_project_id = selected_iid
         project_data_tuple = self.db_ops.get_project_by_id(self.selected_project_id)
 
         if project_data_tuple:
@@ -286,11 +324,11 @@ class ProjectManagementWindow(tk.Toplevel):
             # 7:p.site_address, 8:p.reception_date, 9:p.start_date_scheduled,
             # 10:p.completion_date_scheduled, 11:p.actual_completion_date,
             # 12:p.responsible_staff_name, 13:p.estimated_amount, 14:p.status, 15:p.remarks
-            
+
             self.project_id_var.set(project_data_tuple[0] or "")
             self.project_code_var.set(project_data_tuple[1] or "")
             self.project_name_var.set(project_data_tuple[2] or "")
-            
+
             customer_id = project_data_tuple[3]
             self.customer_id_var.set(str(customer_id) if customer_id is not None else "")
             customer_display_val = "-----" # デフォルト
@@ -316,26 +354,51 @@ class ProjectManagementWindow(tk.Toplevel):
             self.completion_date_scheduled_var.set(project_data_tuple[10] or "")
             self.actual_completion_date_var.set(project_data_tuple[11] or "")
             self.responsible_staff_var.set(project_data_tuple[12] or "")
-            
+
             estimated_amount = project_data_tuple[13]
             self.estimated_amount_var.set(f"{estimated_amount:,}" if estimated_amount is not None else "0")
-            
-            self.status_var.set(project_data_tuple[14] or self.status_options[0]) # status_comboboxのtextvariable
-            
+
+            # status_var に値をセットし、status_combobox にも反映
+            self.status_var.set(project_data_tuple[14] or (self.status_options[0] if self.status_options else ""))
+            if hasattr(self, 'status_combobox'):
+                self.status_combobox.set(self.status_var.get())
+
+
             self.remarks_text.delete("1.0", tk.END)
             self.remarks_text.insert("1.0", project_data_tuple[15] or "")
 
             # フォームのフィールドを読み取り専用に設定
-            for key, widget in self.form_entries.items():
-                if key == "project_id": widget.config(state="readonly"); continue # IDは常にreadonly
-                if isinstance(widget, tk.Text):
-                    widget.config(state=tk.DISABLED)
-                    if key == "remarks":
-                        widget.config(bg="#f0f0f0")  # 備考欄をグレーに
-                elif isinstance(widget, ttk.Combobox):
-                    widget.config(state="disabled") # 表示時はdisabled
-                else:
-                    widget.config(state="readonly")
+            for field_key, widget_from_dict in self.form_entries.items():
+                if field_key == "project_id":
+                    widget_from_dict.config(state="readonly")
+                    continue
+
+                if field_key == "reception_date": # Handle CustomDate specifically
+                    if hasattr(self, 'reception_date_select_button'):
+                        self.reception_date_select_button.config(state=tk.DISABLED)
+                    if hasattr(self, 'reception_date_entry'): # Entry part of CustomDate
+                        # reception_date_entryはFrameなので、その中のEntryウィジェットの状態を変更
+                        # date_display_entryがそれに該当するが、直接アクセスできるようにする必要がある
+                        # ここではform_entriesに格納されているのがFrameなので、その中のEntryを探すか、
+                        # form_entriesの構造を見直す。
+                        # 今回は、reception_date_entryはFrameなので、その中のEntryは別途制御するか、
+                        # reception_date_entryを直接readonlyにするのは効果がない。
+                        # date_display_entryをselfに持たせて制御するのが良い。
+                        # 仮に reception_date_entry が ttk.Entry なら以下でOK
+                        # widget_from_dict.config(state="readonly")
+                        pass # CustomDateのEntry部分はtextvariable経由なので、ボタンで制御
+                    continue
+
+                if isinstance(widget_from_dict, tk.Text):
+                    widget_from_dict.config(state=tk.DISABLED)
+                    if field_key == "remarks": # remarks_text is the key from form_entries
+                        widget_from_dict.config(bg="#f0f0f0")
+                elif isinstance(widget_from_dict, ttk.Combobox):
+                    widget_from_dict.config(state="disabled")
+                elif isinstance(widget_from_dict, ttk.Entry):
+                    widget_from_dict.config(state="readonly")
+                # If widget_from_dict is a Frame (other than handled CustomDate), its state is not set here.
+
             if hasattr(self, 'project_code_entry'): self.project_code_entry.config(state='readonly')
 
             # ボタンの状態を更新
@@ -385,9 +448,9 @@ class ProjectManagementWindow(tk.Toplevel):
         self.project_code_var.set("")
         self.project_name_var.set("")
         self.customer_id_var.set("")
-        self.customer_display_var.set(self.customer_choices_map.get("-----", "-----") if hasattr(self, 'customer_choices_map') else "-----")
+        self.customer_display_var.set(self.customer_choices_map.get("-----", "-----") if hasattr(self, 'customer_choices_map') and "-----" in self.customer_choices_map else "-----")
         self.parent_project_id_var.set("")
-        self.parent_project_display_var.set(self.parent_project_choices_map.get("-----", "-----") if hasattr(self, 'parent_project_choices_map') else "-----")
+        self.parent_project_display_var.set(self.parent_project_choices_map.get("-----", "-----") if hasattr(self, 'parent_project_choices_map') and "-----" in self.parent_project_choices_map else "-----")
         self.site_address_var.set("")
         self.reception_date_var.set("")
         self.start_date_scheduled_var.set("")
@@ -396,21 +459,35 @@ class ProjectManagementWindow(tk.Toplevel):
         self.responsible_staff_var.set("")
         self.estimated_amount_var.set("0")
         self.status_var.set(self.status_options[0] if hasattr(self, 'status_options') and self.status_options else "")
+        if hasattr(self, 'status_combobox'): # status_combobox にも値を反映
+             self.status_combobox.set(self.status_var.get())
+
         if hasattr(self, 'remarks_text'): self.remarks_text.delete("1.0", tk.END)
 
-        for key, widget in self.form_entries.items():
+        for field_key, widget_from_dict in self.form_entries.items():
             # project_id は常に readonly
-            if key == "project_id" and hasattr(self, 'project_id_entry') and widget == self.project_id_entry:
-                widget.config(state="readonly")
+            if field_key == "project_id":
+                if hasattr(self, 'project_id_entry'): # Ensure self.project_id_entry exists
+                    self.project_id_entry.config(state="readonly")
                 continue
-            if isinstance(widget, tk.Text):
-                widget.config(state=tk.NORMAL)
-                if key == "remarks":
-                    widget.config(bg="white")  # 備考欄を白に戻す
-            elif isinstance(widget, ttk.Combobox):
-                widget.config(state="readonly")
-            else:
-                widget.config(state="normal")
+
+            if field_key == "reception_date": # Handle CustomDate's button
+                if hasattr(self, 'reception_date_select_button'):
+                    self.reception_date_select_button.config(state=tk.NORMAL)
+                # CustomDate内のEntryはtextvariable経由でクリアされる
+                continue
+
+            if isinstance(widget_from_dict, tk.Text):
+                widget_from_dict.config(state=tk.NORMAL)
+                if field_key == "remarks" and hasattr(self, 'remarks_text'):
+                    self.remarks_text.config(bg="white")
+            elif isinstance(widget_from_dict, ttk.Combobox):
+                widget_from_dict.config(state="readonly")
+            elif isinstance(widget_from_dict, ttk.Entry):
+                 # project_code_entry might be set to readonly by _suggest_project_code if for_new_project is true
+                if not (for_new_project and field_key == "project_code"):
+                    widget_from_dict.config(state="normal")
+            # Other widget types (like unhandled Frames) in form_entries are not configured here.
 
         if hasattr(self, 'project_id_entry'):
             self.project_id_entry.config(state="readonly")
@@ -493,30 +570,37 @@ class ProjectManagementWindow(tk.Toplevel):
         self._is_editing_project = True
 
         # 編集可能にするフィールド (案件ID、案件コードは通常編集不可)
-        editable_fields = [
-            "project_name_entry", "customer_id_combobox", "parent_project_id_combobox",
-            "site_address_entry", "reception_date_entry", "start_date_scheduled_entry",
-            "completion_date_scheduled_entry", "actual_completion_date_entry",
-            "responsible_staff_entry", "estimated_amount_entry", "status_combobox",
-            "remarks_text"
+        editable_fields_keys = [ # form_entries のキーに対応
+            "project_name", "customer_id", "parent_project_id",
+            "site_address", "reception_date", "start_date_scheduled",
+            "completion_date_scheduled", "actual_completion_date",
+            "responsible_staff", "estimated_amount", "status",
+            "remarks"
         ]
-        
-        for field_key, widget in self.form_entries.items():
-            if field_key in editable_fields:
-                if isinstance(widget, tk.Text):
-                    widget.config(state=tk.NORMAL)
-                    if field_key == "remarks":
-                        widget.config(bg="white")  # 備考欄を白に戻す
-                elif isinstance(widget, ttk.Combobox):
-                     widget.config(state="readonly") # Comboboxは readonly で選択を許可
-                else: # ttk.Entry
-                    widget.config(state="normal")
-            elif field_key not in ["project_id", "project_code"]: # IDとコード以外は念のため readonly
-                if isinstance(widget, tk.Text):
-                    widget.config(state=tk.DISABLED)
-                else:
-                    widget.config(state="readonly")
-        
+
+        for field_key, widget_from_dict in self.form_entries.items():
+            if field_key in editable_fields_keys:
+                if field_key == "reception_date": # Handle CustomDate specifically
+                    if hasattr(self, 'reception_date_select_button'):
+                        self.reception_date_select_button.config(state=tk.NORMAL)
+                    # CustomDate内のEntryはtextvariable経由なので、ボタンで制御
+                    continue
+
+                if isinstance(widget_from_dict, tk.Text):
+                    widget_from_dict.config(state=tk.NORMAL)
+                    if field_key == "remarks" and hasattr(self, 'remarks_text'): # remarks_text は widget_from_dict と同じはず
+                        widget_from_dict.config(bg="white")
+                elif isinstance(widget_from_dict, ttk.Combobox):
+                     widget_from_dict.config(state="readonly") # Comboboxはreadonlyで選択可能
+                elif isinstance(widget_from_dict, ttk.Entry):
+                    widget_from_dict.config(state="normal")
+            elif field_key not in ["project_id", "project_code"]: # 編集不可だが、IDやコードでもないもの
+                if isinstance(widget_from_dict, tk.Text):
+                    widget_from_dict.config(state=tk.DISABLED)
+                elif isinstance(widget_from_dict, (ttk.Entry, ttk.Combobox)):
+                    widget_from_dict.config(state="readonly" if isinstance(widget_from_dict, ttk.Entry) else "disabled")
+
+
         # 案件コードは自動採番の結果なので通常編集不可、IDも表示専用
         if hasattr(self, 'project_code_entry'): self.project_code_entry.config(state="readonly")
         if hasattr(self, 'project_id_entry'): self.project_id_entry.config(state="readonly")
@@ -530,7 +614,7 @@ class ProjectManagementWindow(tk.Toplevel):
 
         if hasattr(self, 'project_name_entry'): # 案件名にフォーカス
             self.project_name_entry.focus_set()
-        
+
         print("Entered project edit mode.")
 
     def update_project_data(self):
@@ -540,7 +624,7 @@ class ProjectManagementWindow(tk.Toplevel):
         if not self._is_editing_project:
             messagebox.showwarning("警告", "案件編集モードではありません。「案件編集開始」ボタンを押してください。", parent=self)
             return
-            
+
         project_code = self.project_code_var.get().strip()
         project_name = self.project_name_var.get().strip()
         customer_id_str = self.customer_id_var.get().strip()
@@ -570,12 +654,12 @@ class ProjectManagementWindow(tk.Toplevel):
             return
 
         result = self.db_ops.update_project(
-            project_id=self.selected_project_id, 
-            project_code=project_code, project_name=project_name, customer_id=customer_id, 
-            parent_project_id=parent_project_id, site_address=site_address, 
+            project_id=self.selected_project_id,
+            project_code=project_code, project_name=project_name, customer_id=customer_id,
+            parent_project_id=parent_project_id, site_address=site_address,
             reception_date=reception_date, start_date_scheduled=start_date_scheduled,
             completion_date_scheduled=completion_date_scheduled, actual_completion_date=actual_completion_date,
-            responsible_staff_name=responsible_staff_name, estimated_amount=estimated_amount, 
+            responsible_staff_name=responsible_staff_name, estimated_amount=estimated_amount,
             status=status, remarks=remarks
         )
         if result is True:
@@ -586,7 +670,10 @@ class ProjectManagementWindow(tk.Toplevel):
             self.load_projects_to_treeview()
             if current_selected_id and hasattr(self, 'project_tree') and self.project_tree.exists(str(current_selected_id)):
                 self.project_tree.selection_set(str(current_selected_id))
-                self.project_tree.focus(str(current_selected_id))
+                self.project_tree.focus(str(current_selected_id)) # フォーカスも設定
+                # Treeview選択イベントを手動でトリガーしてフォームを再描画
+                self.on_project_tree_select(None)
+
             else:
                 self.clear_form(for_new_project=True)
         elif result == "DUPLICATE_CODE": messagebox.showerror("更新エラー", f"案件コード「{project_code}」は既に他の案件で使用されています。", parent=self)
@@ -619,8 +706,93 @@ class ProjectManagementWindow(tk.Toplevel):
             return
         print(f"Opening quotation list for project ID: {self.selected_project_id}")
         # ProjectManagementWindowがQuotationListWindowのmasterとなる
-        quotation_list_win = QuotationListWindow(self) 
+        quotation_list_win = QuotationListWindow(self)
         # quotation_list_win.grab_set() # 必要に応じて
+
+    def _open_reception_date_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("日付選択")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        try:
+            from tkcalendar import Calendar
+        except ImportError:
+            messagebox.showerror("エラー", "tkcalendarパッケージが必要です。", parent=self)
+            if dialog.winfo_exists(): dialog.destroy()
+            return
+
+        current_date_str = self.reception_date_var.get()
+        initial_selection_date = None
+        if current_date_str:
+            try:
+                initial_selection_date = datetime.strptime(current_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                initial_selection_date = datetime.now().date()
+        else:
+            initial_selection_date = datetime.now().date()
+
+        cal = Calendar(dialog, selectmode='day', locale='ja_JP',
+                       year=initial_selection_date.year,
+                       month=initial_selection_date.month,
+                       day=initial_selection_date.day,
+                       date_pattern='yyyy-mm-dd') # date_pattern を設定
+        cal.pack(padx=10, pady=10)
+
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=(0, 10), padx=10, fill='x')
+
+        def on_ok():
+            try:
+                # tkcalendar から選択された日付を datetime.date オブジェクトとして取得
+                selected_date = cal.selection_get() # selection_get() は datetime.date を返す
+                if selected_date:
+                    self.reception_date_var.set(selected_date.strftime("%Y-%m-%d"))
+                else:
+                    # 何も選択されなかった場合（通常は発生しづらいが念のため）
+                    self.reception_date_var.set("")
+            except Exception as e:
+                # 予期せぬエラーが発生した場合の処理
+                print(f"日付選択エラー: {e}")
+                messagebox.showerror("エラー", f"日付の処理中にエラーが発生しました: {e}", parent=dialog)
+            finally:
+                # エラーの有無にかかわらずダイアログを閉じる
+                if dialog.winfo_exists(): # ダイアログが存在する場合のみ閉じる
+                    dialog.destroy()
+
+        def on_cancel():
+            if dialog.winfo_exists(): dialog.destroy()
+
+        ok_button = ttk.Button(button_frame, text="OK", command=on_ok, width=10)
+        cancel_button = ttk.Button(button_frame, text="キャンセル", command=on_cancel, width=10)
+
+        button_frame.columnconfigure(0, weight=1)
+        button_frame.columnconfigure(1, weight=0)
+        button_frame.columnconfigure(2, weight=0)
+        button_frame.columnconfigure(3, weight=1)
+        ok_button.grid(row=0, column=1, padx=5)
+        cancel_button.grid(row=0, column=2, padx=5)
+
+        self.update_idletasks() # 親ウィンドウの更新を確実に行う
+        dialog.update_idletasks() # ダイアログの更新
+
+        master_win = self
+        dialog_width = dialog.winfo_reqwidth()
+        dialog_height = dialog.winfo_reqheight()
+
+        # 親ウィンドウの中心にダイアログを配置
+        x = master_win.winfo_x() + (master_win.winfo_width() // 2) - (dialog_width // 2)
+        y = master_win.winfo_y() + (master_win.winfo_height() // 2) - (dialog_height // 2)
+
+        # 画面外に出ないように調整
+        screen_width = master_win.winfo_screenwidth()
+        screen_height = master_win.winfo_screenheight()
+        x = max(0, min(x, screen_width - dialog_width))
+        y = max(0, min(y, screen_height - dialog_height))
+
+        dialog.geometry(f'{dialog_width}x{dialog_height}+{x}+{y}')
+        ok_button.focus_set()
+        dialog.wait_window()
 
     def on_close(self):
         self.destroy()
@@ -639,7 +811,7 @@ if __name__ == '__main__':
 
     def open_project_management_window():
         project_win = ProjectManagementWindow(root)
-    
+
     open_button = ttk.Button(root, text="案件管理を開く", command=open_project_management_window)
     open_button.pack(padx=20, pady=20)
     root.mainloop()
